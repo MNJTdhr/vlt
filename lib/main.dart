@@ -1,3 +1,4 @@
+// main.dart
 import 'package:flutter/material.dart';
 import 'data/notifiers.dart';
 import 'pages/home_page.dart';
