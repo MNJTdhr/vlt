@@ -5,11 +5,13 @@ import 'pages/browser_page.dart';
 import 'pages/settings_page.dart';
 
 void main() {
-  runApp(const MyApp());
+  // Initialize default folders on app start
+  initializeFolders();
+  runApp(const VaultApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class VaultApp extends StatelessWidget {
+  const VaultApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +38,11 @@ class MyApp extends StatelessWidget {
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
 
-  final List<Widget> pages = const [HomePage(), BrowserPage(), SettingsPage()];
+  final List<Widget> pages = const [
+    HomePage(),
+    BrowserPage(),
+    SettingsPage(),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +53,10 @@ class MainScreen extends StatelessWidget {
           appBar: AppBar(
             title: const Text(
               'Vault',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+              ),
             ),
             centerTitle: true,
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -58,8 +67,7 @@ class MainScreen extends StatelessWidget {
                 builder: (context, isDarkMode, child) {
                   return IconButton(
                     onPressed: () {
-                      selectedThemeNotifier.value =
-                          !selectedThemeNotifier.value;
+                      selectedThemeNotifier.value = !selectedThemeNotifier.value;
                     },
                     icon: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 300),
@@ -68,16 +76,17 @@ class MainScreen extends StatelessWidget {
                         key: ValueKey(isDarkMode),
                       ),
                     ),
-                    tooltip: isDarkMode
-                        ? 'Switch to Light Mode'
-                        : 'Switch to Dark Mode',
+                    tooltip: isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
                   );
                 },
               ),
               const SizedBox(width: 10),
             ],
           ),
-          body: IndexedStack(index: selectedIndex, children: pages),
+          body: IndexedStack(
+            index: selectedIndex,
+            children: pages,
+          ),
           bottomNavigationBar: ValueListenableBuilder(
             valueListenable: selectedPageNotifier,
             builder: (context, selectedIndex, child) {
