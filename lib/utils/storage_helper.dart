@@ -6,46 +6,48 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path/path.dart' as path; // ✅ Needed for file path handling
+import 'package:path/path.dart' as path;
 import '../data/notifiers.dart';
 
 class StorageHelper {
   static const String folderMetadataKey = 'vault_folder_metadata';
 
-  // ✅ Get the base directory: /storage/emulated/0/Android/media/com.vlt.app/.vlt/
+  /// ✅ Get the base vault directory: /storage/emulated/0/Android/media/com.vlt.app/.vlt/
   static Future<Directory> getBaseDirectory() async {
     final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
     if (!(await dir.exists())) {
-      await dir.create(recursive: true);
+      await dir.create(recursive: true); // Create directory if not present
     }
     return dir;
   }
 
-  // ✅ Alias for getBaseDirectory for consistency
+  /// ✅ Alias method for consistent naming
   static Future<Directory> getVaultRootDirectory() => getBaseDirectory();
 
-  // ✅ Request storage permission
+  /// ✅ Ask for manage external storage permission
   static Future<bool> requestStoragePermission() async {
     final status = await Permission.manageExternalStorage.request();
     return status.isGranted;
   }
 
-  // ✅ Save folders metadata to SharedPreferences
+  /// ✅ Save folder metadata list to SharedPreferences as JSON
   static Future<void> saveFoldersMetadata(List<VaultFolder> folders) async {
     final prefs = await SharedPreferences.getInstance();
+
     final List<Map<String, dynamic>> jsonList = folders.map((folder) {
       return {
         'id': folder.id,
         'name': folder.name,
         'icon': folder.icon.codePoint,
-        'color': folder.color.value,
+        'color': folder.color.toARGB32(), // Save full color value
         'itemCount': folder.itemCount,
       };
     }).toList();
+
     prefs.setString(folderMetadataKey, jsonEncode(jsonList));
   }
 
-  // ✅ Load folders metadata from SharedPreferences
+  /// ✅ Load folder metadata from SharedPreferences
   static Future<List<VaultFolder>> loadFoldersMetadata() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString(folderMetadataKey);
@@ -64,7 +66,7 @@ class StorageHelper {
     }).toList();
   }
 
-  // ✅ Create a folder in the base directory
+  /// ✅ Create a main folder inside .vlt directory
   static Future<Directory?> createPersistentFolder(String folderName) async {
     final permissionGranted = await requestStoragePermission();
     if (!permissionGranted) return null;
@@ -78,20 +80,28 @@ class StorageHelper {
     return folder;
   }
 
-  // ✅ Create a subfolder inside a folder in .vlt
-  static Future<void> createPersistentSubfolder(String parentFolder, String subfolderName) async {
+  /// ✅ Create subfolder inside a given parent folder in .vlt
+  static Future<void> createPersistentSubfolder(
+    String parentFolder,
+    String subfolderName,
+  ) async {
     final root = await getVaultRootDirectory();
-    final subfolder = Directory(path.join(root.path, parentFolder, subfolderName));
+    final subfolder = Directory(
+      path.join(root.path, parentFolder, subfolderName),
+    );
 
     if (!(await subfolder.exists())) {
       await subfolder.create(recursive: true);
     }
   }
 
-  // ✅ Copy a file to a vault folder
+  /// ✅ Save file to a vault folder
+  ///
+  /// If `context` is provided, shows an AlertDialog on error
   static Future<File?> saveFileToVault({
     required String folderName,
     required File file,
+    BuildContext? context, // Optional context for showing error dialog
   }) async {
     try {
       final root = await getVaultRootDirectory();
@@ -104,9 +114,30 @@ class StorageHelper {
       final filename = path.basename(file.path);
       final newFilePath = path.join(folder.path, filename);
       final newFile = await file.copy(newFilePath);
+
       return newFile;
     } catch (e) {
-      print('Error saving file to vault: $e');
+      // ✅ Use safe post-frame callback to avoid context errors after async gaps
+      if (context != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            showDialog(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: const Text('File Error'),
+                content: Text('Failed to save file:\n$e'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            );
+          }
+        });
+      }
+
       return null;
     }
   }

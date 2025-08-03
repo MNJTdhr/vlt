@@ -3,7 +3,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../data/notifiers.dart';
-import '../utils/storage_helper.dart';
+import 'package:vlt/utils/storage_helper.dart';
 
 class FolderViewPage extends StatefulWidget {
   final String folderName;

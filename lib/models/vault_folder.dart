@@ -32,14 +32,14 @@ class VaultFolder {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'iconCodePoint': icon.codePoint,
-        'iconFontFamily': icon.fontFamily,
-        'iconFontPackage': icon.fontPackage,
-        'color': color.value,
-        'itemCount': itemCount,
-      };
+    'id': id,
+    'name': name,
+    'iconCodePoint': icon.codePoint,
+    'iconFontFamily': icon.fontFamily,
+    'iconFontPackage': icon.fontPackage,
+    'color': color.toARGB32(),
+    'itemCount': itemCount,
+  };
 
   factory VaultFolder.fromJson(Map<String, dynamic> json) {
     return VaultFolder(
