@@ -952,23 +952,6 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  // void _renameFolder(BuildContext context, VaultFolder folder, String newName) {
-  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-  //   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-
-  //   if (folderIndex != -1) {
-  //     currentFolders[folderIndex] = folder.copyWith(name: newName);
-  //     foldersNotifier.value = currentFolders;
-
-  //     ScaffoldMessenger.of(context).showSnackBar(
-  //       SnackBar(
-  //         content: Text('Folder renamed to "$newName"'),
-  //         duration: const Duration(seconds: 2),
-  //       ),
-  //     );
-  //   }
-  // }
-
   void _renameFolder(
     BuildContext context,
     VaultFolder folder,
@@ -994,19 +977,6 @@ class HomePage extends StatelessWidget {
   }
 
   // _deleteFolder - Removes folder from the list
-  // void _deleteFolder(BuildContext context, VaultFolder folder) {
-  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-  //   currentFolders.removeWhere((f) => f.id == folder.id);
-  //   foldersNotifier.value = currentFolders;
-
-  //   ScaffoldMessenger.of(context).showSnackBar(
-  //     SnackBar(
-  //       content: Text('Folder "${folder.name}" deleted'),
-  //       duration: const Duration(seconds: 2),
-  //     ),
-  //   );
-  // }
-
   void _deleteFolder(BuildContext context, VaultFolder folder) async {
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     currentFolders.removeWhere((f) => f.id == folder.id);
@@ -1022,38 +992,6 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
-
-  // void _customizeFolder(
-  //   BuildContext context,
-  //   VaultFolder folder,
-  //   IconData newIcon,
-  //   Color newColor,
-  // ) {
-  //   // Gets current folder list
-  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-
-  //   // Finds the folder to update by ID
-  //   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-
-  //   if (folderIndex != -1) {
-  //     // Updates folder with new icon and color using copyWith
-  //     currentFolders[folderIndex] = folder.copyWith(
-  //       icon: newIcon,
-  //       color: newColor,
-  //     );
-
-  //     // Updates the ValueNotifier to refresh UI
-  //     foldersNotifier.value = currentFolders;
-
-  //     // Shows success message
-  //     ScaffoldMessenger.of(context).showSnackBar(
-  //       SnackBar(
-  //         content: Text('Folder "${folder.name}" customized successfully!'),
-  //         duration: const Duration(seconds: 2),
-  //       ),
-  //     );
-  //   }
-  // }
 
   void _customizeFolder(
     BuildContext context,
