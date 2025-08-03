@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/notifiers.dart';
+import 'package:vlt/pages/folder_view_page.dart';
+import 'package:vlt/utils/storage_helper.dart';
 
 // HomePage - Main screen displaying the vault interface
 // Contains welcome section and folder grid layout with management features
@@ -163,9 +165,14 @@ class HomePage extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () {
-          // Opens folder details when tapped
-          _openFolder(context, folder);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FolderViewPage(folderName: folder.name),
+            ),
+          );
         },
+
         child: Stack(
           children: [
             Padding(
@@ -499,10 +506,9 @@ class HomePage extends StatelessWidget {
                     const SizedBox(width: 16),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           final name = nameController.text.trim();
                           if (name.isNotEmpty) {
-                            // Create new folder
                             final newFolder = VaultFolder(
                               id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
                               name: name,
@@ -511,16 +517,20 @@ class HomePage extends StatelessWidget {
                               itemCount: 0,
                             );
 
-                            // Add to folders list
                             final currentFolders = List<VaultFolder>.from(
                               foldersNotifier.value,
                             );
                             currentFolders.add(newFolder);
                             foldersNotifier.value = currentFolders;
 
+                            // ✅ Create folder directory and save metadata
+                            await StorageHelper.createPersistentFolder(name);
+                            await StorageHelper.saveFoldersMetadata(
+                              currentFolders,
+                            );
+
                             Navigator.pop(context);
 
-                            // Show success message
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
@@ -531,6 +541,7 @@ class HomePage extends StatelessWidget {
                             );
                           }
                         },
+
                         icon: const Icon(Icons.add),
                         label: const Text('Create Folder'),
                       ),
@@ -941,13 +952,37 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  void _renameFolder(BuildContext context, VaultFolder folder, String newName) {
+  // void _renameFolder(BuildContext context, VaultFolder folder, String newName) {
+  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  //   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+
+  //   if (folderIndex != -1) {
+  //     currentFolders[folderIndex] = folder.copyWith(name: newName);
+  //     foldersNotifier.value = currentFolders;
+
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       SnackBar(
+  //         content: Text('Folder renamed to "$newName"'),
+  //         duration: const Duration(seconds: 2),
+  //       ),
+  //     );
+  //   }
+  // }
+
+  void _renameFolder(
+    BuildContext context,
+    VaultFolder folder,
+    String newName,
+  ) async {
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
 
     if (folderIndex != -1) {
       currentFolders[folderIndex] = folder.copyWith(name: newName);
       foldersNotifier.value = currentFolders;
+
+      // ✅ Save updated metadata
+      await StorageHelper.saveFoldersMetadata(currentFolders);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -959,10 +994,26 @@ class HomePage extends StatelessWidget {
   }
 
   // _deleteFolder - Removes folder from the list
-  void _deleteFolder(BuildContext context, VaultFolder folder) {
+  // void _deleteFolder(BuildContext context, VaultFolder folder) {
+  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  //   currentFolders.removeWhere((f) => f.id == folder.id);
+  //   foldersNotifier.value = currentFolders;
+
+  //   ScaffoldMessenger.of(context).showSnackBar(
+  //     SnackBar(
+  //       content: Text('Folder "${folder.name}" deleted'),
+  //       duration: const Duration(seconds: 2),
+  //     ),
+  //   );
+  // }
+
+  void _deleteFolder(BuildContext context, VaultFolder folder) async {
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     currentFolders.removeWhere((f) => f.id == folder.id);
     foldersNotifier.value = currentFolders;
+
+    // ✅ Save updated metadata
+    await StorageHelper.saveFoldersMetadata(currentFolders);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -972,29 +1023,57 @@ class HomePage extends StatelessWidget {
     );
   }
 
+  // void _customizeFolder(
+  //   BuildContext context,
+  //   VaultFolder folder,
+  //   IconData newIcon,
+  //   Color newColor,
+  // ) {
+  //   // Gets current folder list
+  //   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+
+  //   // Finds the folder to update by ID
+  //   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+
+  //   if (folderIndex != -1) {
+  //     // Updates folder with new icon and color using copyWith
+  //     currentFolders[folderIndex] = folder.copyWith(
+  //       icon: newIcon,
+  //       color: newColor,
+  //     );
+
+  //     // Updates the ValueNotifier to refresh UI
+  //     foldersNotifier.value = currentFolders;
+
+  //     // Shows success message
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       SnackBar(
+  //         content: Text('Folder "${folder.name}" customized successfully!'),
+  //         duration: const Duration(seconds: 2),
+  //       ),
+  //     );
+  //   }
+  // }
+
   void _customizeFolder(
     BuildContext context,
     VaultFolder folder,
     IconData newIcon,
     Color newColor,
-  ) {
-    // Gets current folder list
+  ) async {
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-
-    // Finds the folder to update by ID
     final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
 
     if (folderIndex != -1) {
-      // Updates folder with new icon and color using copyWith
       currentFolders[folderIndex] = folder.copyWith(
         icon: newIcon,
         color: newColor,
       );
-
-      // Updates the ValueNotifier to refresh UI
       foldersNotifier.value = currentFolders;
 
-      // Shows success message
+      // ✅ Save updated metadata
+      await StorageHelper.saveFoldersMetadata(currentFolders);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Folder "${folder.name}" customized successfully!'),
@@ -1002,145 +1081,5 @@ class HomePage extends StatelessWidget {
         ),
       );
     }
-  }
-
-  // _openFolder - Shows a modal bottom sheet with folder details and actions
-  // Takes the selected folder and displays its contents (empty state for now)
-  void _openFolder(BuildContext context, VaultFolder folder) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle bar - Visual indicator for draggable bottom sheet
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.outline.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Folder info - Header section showing folder details
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: folder.color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Icon(folder.icon, size: 32, color: folder.color),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            folder.name,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            '${folder.itemCount} items',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.7),
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Empty state - Shows when folder has no files
-              Column(
-                children: [
-                  Icon(
-                    Icons.folder_open_outlined,
-                    size: 48,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outline.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'This folder is empty',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.7),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add files to secure them in your vault',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 24),
-
-              // Action buttons - Close and Add Files functionality
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.pop(context), // Closes the bottom sheet
-                      icon: const Icon(Icons.close),
-                      label: const Text('Close'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () {
-                        // TODO: Implement file picker and add files to folder
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Add files to ${folder.name} - Coming soon!',
-                            ),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Files'),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

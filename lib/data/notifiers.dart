@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../utils/storage_helper.dart';
+
 
 // Navigation state notifier
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
@@ -78,11 +80,17 @@ List<VaultFolder> getDefaultFolders() {
 }
 
 // Initialize folders with default values
-void initializeFolders() {
-  if (foldersNotifier.value.isEmpty) {
+Future<void> initializeFolders() async {
+  final savedFolders = await StorageHelper.loadFoldersMetadata();
+
+  if (savedFolders.isNotEmpty) {
+    foldersNotifier.value = savedFolders;
+  } else {
     foldersNotifier.value = getDefaultFolders();
+    await StorageHelper.saveFoldersMetadata(foldersNotifier.value);
   }
 }
+
 
 // Available icons for new folders
 const List<IconData> availableIcons = [

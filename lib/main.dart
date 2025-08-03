@@ -5,9 +5,9 @@ import 'pages/home_page.dart';
 import 'pages/browser_page.dart';
 import 'pages/settings_page.dart';
 
-void main() {
-  // Initialize default folders on app start
-  initializeFolders();
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeFolders();
   runApp(const VaultApp());
 }
 
