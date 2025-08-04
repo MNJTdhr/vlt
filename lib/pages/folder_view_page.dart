@@ -18,38 +18,15 @@ class FolderViewPage extends StatefulWidget {
   State<FolderViewPage> createState() => _FolderViewPageState();
 }
 
+// Add 'SingleTickerProviderStateMixin' to use an AnimationController for the FAB animation.
 class _FolderViewPageState extends State<FolderViewPage>
     with SingleTickerProviderStateMixin {
   late VaultFolder currentFolder;
-  List<FileSystemEntity> folderFiles = []; // List of files/subfolders
-  bool isFabMenuOpen = false;
+  List<FileSystemEntity> folderFiles = []; // Stores files inside the folder
+
+  // --- FAB Animation State ---
   late AnimationController _fabAnimationController;
-
-  // Color and icon options for subfolders
-  final List<Color> availableColors = [
-    Colors.blue,
-    Colors.red,
-    Colors.green,
-    Colors.orange,
-    Colors.purple,
-    Colors.teal,
-    Colors.pink,
-  ];
-
-  final List<IconData> availableIcons = [
-    Icons.folder,
-    Icons.photo_library,
-    Icons.video_library,
-    Icons.note,
-    Icons.music_note,
-    Icons.picture_as_pdf,
-    Icons.description,
-    Icons.archive,
-    Icons.favorite,
-    Icons.star,
-    Icons.work,
-    Icons.school,
-  ];
+  bool isFabMenuOpen = false; // Controls the FAB menu's open/closed state.
 
   @override
   void initState() {
@@ -58,19 +35,38 @@ class _FolderViewPageState extends State<FolderViewPage>
       (f) => f.name == widget.folderName,
       orElse: () => foldersNotifier.value.first,
     );
+
+    // Initialize the AnimationController for the FAB open/close animation.
     _fabAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
+
     _loadFolderFiles();
   }
 
   @override
   void dispose() {
+    // Dispose the controller when the widget is removed to free up resources.
     _fabAnimationController.dispose();
     super.dispose();
   }
 
+  /// Toggles the Floating Action Button menu between open and closed states.
+  void _toggleFabMenu() {
+    setState(() {
+      isFabMenuOpen = !isFabMenuOpen;
+      if (isFabMenuOpen) {
+        // If the menu is opening, play the animation forward.
+        _fabAnimationController.forward();
+      } else {
+        // If the menu is closing, play the animation in reverse.
+        _fabAnimationController.reverse();
+      }
+    });
+  }
+
+  /// Loads all files from the specified folder directory.
   Future<void> _loadFolderFiles() async {
     final base = await StorageHelper.getVaultRootDirectory();
     final folderPath = Directory('${base.path}/${widget.folderName}');
@@ -82,10 +78,12 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
+  /// Opens the selected file using the device's default application.
   void _openFile(File file) {
     OpenFile.open(file.path);
   }
 
+  /// Opens the file picker to select files of a specific type and copies them to the vault.
   Future<void> _pickAndCopyFiles(FileType type) async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
@@ -118,7 +116,13 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
+  /// Handles the action when a FAB menu item is tapped.
   Future<void> _handleOption(String type) async {
+    // Close the FAB menu before performing the action.
+    if (isFabMenuOpen) {
+      _toggleFabMenu();
+    }
+
     switch (type) {
       case 'Add Images':
         await _pickAndCopyFiles(FileType.image);
@@ -130,149 +134,29 @@ class _FolderViewPageState extends State<FolderViewPage>
         await _pickAndCopyFiles(FileType.any);
         break;
       case 'Add Folder':
-        _showCreateSubfolderDialog();
+        _showComingSoonDialog('Add Folder');
         break;
     }
   }
 
-  void _showCreateSubfolderDialog() {
-    final nameController = TextEditingController();
-    IconData selectedIcon = availableIcons[0];
-    Color selectedColor = availableColors[0];
-
-    showModalBottomSheet(
+  /// Shows a dialog for features that are not yet implemented.
+  void _showComingSoonDialog(String title) {
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setModalState) => SafeArea(
-          child: Container(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-              top: 16,
-              left: 16,
-              right: 16,
-            ),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Center(
-                  child: Icon(Icons.drag_handle, size: 30, color: Colors.grey),
-                ),
-                const SizedBox(height: 8),
-                const Center(
-                  child: Text("Create New Folder",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-                const Center(
-                  child: Text("Choose name, icon and color",
-                      style: TextStyle(color: Colors.grey)),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Enter folder name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.edit),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text("Choose Icon",
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: availableIcons.map((icon) {
-                    final isSelected = icon == selectedIcon;
-                    return GestureDetector(
-                      onTap: () => setModalState(() => selectedIcon = icon),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isSelected
-                              ? selectedColor.withOpacity(0.2)
-                              : Colors.grey.shade200,
-                          border: Border.all(
-                            color:
-                                isSelected ? selectedColor : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(icon,
-                            color:
-                                isSelected ? selectedColor : Colors.black),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 20),
-                const Text("Choose Color",
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 12,
-                  children: availableColors.map((color) {
-                    final isSelected = color == selectedColor;
-                    return GestureDetector(
-                      onTap: () => setModalState(() => selectedColor = color),
-                      child: CircleAvatar(
-                        backgroundColor: color,
-                        radius: 16,
-                        child: isSelected
-                            ? const Icon(Icons.check,
-                                color: Colors.white, size: 18)
-                            : null,
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                      label: const Text("Cancel"),
-                    ),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.check),
-                      onPressed: () async {
-                        final name = nameController.text.trim();
-                        if (name.isNotEmpty) {
-                          await StorageHelper.createPersistentSubfolder(
-                            widget.folderName,
-                            name,
-                          );
-                          if (!mounted) return;
-                          Navigator.pop(context);
-                          await _loadFolderFiles();
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: selectedColor,
-                      ),
-                      label: const Text("Create Folder"),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-        ),
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: const Text('This feature will be available soon.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          )
+        ],
       ),
     );
   }
 
+  // --- File Type Checkers ---
   bool _isImage(String path) {
     final ext = p.extension(path).toLowerCase();
     return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext);
@@ -283,6 +167,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     return ['.mp4', '.mov', '.avi', '.mkv'].contains(ext);
   }
 
+  /// Builds the appropriate thumbnail for a given file.
   Widget _buildThumbnail(File file) {
     final path = file.path;
 
@@ -298,7 +183,8 @@ class _FolderViewPageState extends State<FolderViewPage>
           fit: StackFit.expand,
           children: [
             Container(color: Colors.black12),
-            const Center(child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
+            const Center(
+                child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
           ],
         ),
       );
@@ -310,17 +196,8 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
-  void _toggleFabMenu() {
-    setState(() {
-      isFabMenuOpen = !isFabMenuOpen;
-      if (isFabMenuOpen) {
-        _fabAnimationController.forward();
-      } else {
-        _fabAnimationController.reverse();
-      }
-    });
-  }
-
+  /// Builds a small, labeled Floating Action Button for the expandable menu.
+  /// This widget represents one of the pop-up options.
   Widget _buildMiniFab({
     required IconData icon,
     required String label,
@@ -329,6 +206,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // The label for the button, styled to look clean.
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
@@ -337,15 +215,16 @@ class _FolderViewPageState extends State<FolderViewPage>
             boxShadow: kElevationToShadow[1],
           ),
           child: Text(label,
-              style: TextStyle(
-                  color: currentFolder.color, fontWeight: FontWeight.bold)),
+              style:
+                  TextStyle(color: currentFolder.color, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(width: 12),
+        // The small FAB itself.
         SizedBox(
           width: 42,
           height: 42,
           child: FloatingActionButton(
-            heroTag: null,
+            heroTag: null, // Use null heroTag for multiple FABs on one screen.
             onPressed: onPressed,
             backgroundColor: currentFolder.color,
             child: Icon(icon, color: Colors.white, size: 22),
@@ -396,52 +275,24 @@ class _FolderViewPageState extends State<FolderViewPage>
                       borderRadius: BorderRadius.circular(8),
                       child: _buildThumbnail(file),
                     );
-                  } else if (file is Directory) {
-                    final folderName = p.basename(file.path);
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => FolderViewPage(
-                                folderName: '${widget.folderName}/$folderName'),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.folder,
-                                size: 40, color: currentFolder.color),
-                            const SizedBox(height: 4),
-                            Text(
-                              folderName,
-                              textAlign: TextAlign.center,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
                   }
                   return const SizedBox.shrink();
                 },
               ),
             ),
+
+      // --- Refactored Floating Action Button ---
+      // This Column holds the expandable menu and the main FAB.
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          // The expandable menu is wrapped in an AnimatedOpacity widget
+          // to create a smooth fade-in/out effect.
           AnimatedOpacity(
             opacity: isFabMenuOpen ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 200),
+            // The Visibility widget ensures the menu items are not interactable when hidden.
             child: Visibility(
               visible: isFabMenuOpen,
               child: Column(
@@ -476,9 +327,11 @@ class _FolderViewPageState extends State<FolderViewPage>
               ),
             ),
           ),
+          // This is the main Floating Action Button.
           FloatingActionButton(
             onPressed: _toggleFabMenu,
             backgroundColor: currentFolder.color,
+            // The RotationTransition animates the '+' icon to an 'x' when the menu opens.
             child: RotationTransition(
               turns: Tween(begin: 0.0, end: 0.125).animate(_fabAnimationController),
               child: const Icon(Icons.add, color: Colors.white, size: 28),
