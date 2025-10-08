@@ -25,8 +25,8 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
   IconData selectedIcon = Icons.folder;
   Color selectedColor = Colors.blue;
   
-  // ✨ NOTE: Using the globally defined constants from notifiers.dart
-  // is a better practice, but this works fine too.
+  // ✨ NOTE: The local 'availableIcons' and 'availableColors' lists have been removed
+  // to use the global constants from 'notifiers.dart', ensuring consistency.
 
   @override
   Widget build(BuildContext context) {
@@ -38,150 +38,158 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
           right: 24,
           top: 24,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
+        child: SingleChildScrollView( // ✨ WRAPPED in SingleChildScrollView to prevent overflow
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
                   decoration: BoxDecoration(
-                    color: selectedColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(selectedIcon, size: 28, color: selectedColor),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Create New Folder',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      Text('Choose name, icon and color',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withOpacity(0.7),
-                              )),
-                    ],
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Folder name input
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Folder Name',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.drive_file_rename_outline),
               ),
-              autofocus: true,
-            ),
-            const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-            // Icon picker
-            _buildLabel('Choose Icon'),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 60,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: availableIcons.map((icon) {
-                  return GestureDetector(
-                    onTap: () => setState(() => selectedIcon = icon),
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: icon == selectedIcon
-                            ? selectedColor.withOpacity(0.15)
-                            : Colors.transparent,
-                        border: Border.all(
-                          color:
-                              icon == selectedIcon ? selectedColor : Colors.grey,
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(icon, color: selectedColor),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Color picker
-            _buildLabel('Choose Color'),
-            const SizedBox(height: 12),
-            Row(
-              children: availableColors.map((color) {
-                final isSelected = color == selectedColor;
-                return GestureDetector(
-                  onTap: () => setState(() => selectedColor = color),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 12),
-                    width: 32,
-                    height: 32,
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: isSelected
-                          ? Border.all(color: Colors.black, width: 2)
-                          : null,
+                      color: selectedColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: isSelected
-                        ? const Icon(Icons.check, color: Colors.white, size: 18)
-                        : null,
+                    child: Icon(selectedIcon, size: 28, color: selectedColor),
                   ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 32),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Create New Folder',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold)),
+                        Text('Choose name, icon and color',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.7),
+                                )),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
 
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                    label: const Text('Cancel'),
-                  ),
+              // Folder name input
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Folder Name',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.drive_file_rename_outline),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _createFolder,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Folder'),
-                  ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 24),
+
+              // Icon picker
+              _buildLabel('Choose Icon'),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 60,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: availableIcons.map((icon) { // ✨ USING global constant
+                    return GestureDetector(
+                      onTap: () => setState(() => selectedIcon = icon),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: icon == selectedIcon
+                              ? selectedColor.withOpacity(0.15)
+                              : Colors.transparent,
+                          border: Border.all(
+                            color:
+                                icon == selectedIcon ? selectedColor : Colors.grey,
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, color: selectedColor),
+                      ),
+                    );
+                  }).toList(),
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 24),
+
+              // Color picker
+              _buildLabel('Choose Color'),
+              const SizedBox(height: 12),
+              SizedBox( // ✨ WRAPPED in SizedBox to allow horizontal scrolling on smaller screens
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: availableColors.map((color) { // ✨ USING global constant
+                    final isSelected = color == selectedColor;
+                    return GestureDetector(
+                      onTap: () => setState(() => selectedColor = color),
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  width: 2.5)
+                              : null,
+                        ),
+                        child: isSelected
+                            ? const Icon(Icons.check, color: Colors.white, size: 18)
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _createFolder,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Folder'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -199,7 +207,13 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
   /// ✨ OVERHAULED: This function now uses the new file-based storage logic.
   Future<void> _createFolder() async {
     final name = nameController.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      // Optional: Show a small error message if the name is empty
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Folder name cannot be empty')),
+      );
+      return;
+    }
 
     final newFolder = VaultFolder(
       // The physical folder will be named after this ID, not the display name.

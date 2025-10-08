@@ -147,7 +147,7 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
-  // _buildEmptyState - Shows when no folders exist
+
   Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Column(
@@ -177,587 +177,82 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
+  
+  // ✨ NOTE: The helper methods below this line are no longer part of the HomePage widget.
+  // They are now defined as standalone functions within the file for clarity.
+}
 
-  // NOTE: The _buildFolderCard method below is not actively used, but it has been
-  // fixed to prevent future errors.
-  Widget _buildFolderCard(BuildContext context, VaultFolder folder) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              // ✨ FIX: Pass the full folder object here as well
-              builder: (_) => FolderViewPage(folder: folder),
-            ),
-          );
-        },
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: folder.color.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(folder.icon, size: 32, color: folder.color),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    folder.name,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${folder.itemCount} items',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: PopupMenuButton<String>(
-                icon: Icon(
-                  Icons.more_vert,
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                  size: 20,
-                ),
-                onSelected: (value) {
-                  if (value == 'rename') {
-                    _showRenameFolderBottomSheet(context, folder);
-                  } else if (value == 'delete') {
-                    _showDeleteFolderDialog(context, folder);
-                  } else if (value == 'customize') {
-                    _showCustomizeFolderBottomSheet(context, folder);
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'rename',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit_outlined, size: 20),
-                        SizedBox(width: 12),
-                        Text('Rename'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'customize',
-                    child: Row(
-                      children: [
-                        Icon(Icons.palette_outlined, size: 20),
-                        SizedBox(width: 12),
-                        Text('Customize'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                        SizedBox(width: 12),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  // _showRenameFolderBottomSheet - Shows bottom sheet to rename existing folder
-  void _showRenameFolderBottomSheet(BuildContext context, VaultFolder folder) {
-    final TextEditingController nameController = TextEditingController(
-      text: folder.name,
-    );
+/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+void _renameFolder(
+  BuildContext context,
+  VaultFolder folder,
+  String newName,
+) async {
+  final updatedFolder = folder.copyWith(name: newName);
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Container(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            left: 24,
-            right: 24,
-            top: 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle bar
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outline.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
+  // Update the physical .metadata.json file.
+  await StorageHelper.updateFolderMetadata(updatedFolder);
 
-              const SizedBox(height: 20),
-
-              // Header with folder preview
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: folder.color.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(folder.icon, size: 28, color: folder.color),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Rename Folder',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          'Enter a new name for this folder',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurface.withValues(alpha: 0.7),
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 24),
-
-              // Name input
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Folder Name',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.drive_file_rename_outline),
-                ),
-                autofocus: true,
-                onSubmitted: (value) {
-                  if (value.trim().isNotEmpty) {
-                    _renameFolder(context, folder, value.trim());
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-
-              const SizedBox(height: 32),
-
-              // Action buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () {
-                        final newName = nameController.text.trim();
-                        if (newName.isNotEmpty) {
-                          _renameFolder(context, folder, newName);
-                          Navigator.pop(context);
-                        }
-                      },
-                      icon: const Icon(Icons.check),
-                      label: const Text('Rename'),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // _showDeleteFolderDialog - Shows confirmation dialog to delete folder
-  void _showDeleteFolderDialog(BuildContext context, VaultFolder folder) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Folder'),
-        content: Text(
-          'Are you sure you want to delete "${folder.name}"?\n\nThis action cannot be undone and all files in this folder will be permanently removed.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              _deleteFolder(context, folder);
-              Navigator.pop(context);
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // _showCustomizeFolderBottomSheet - Shows bottom sheet to customize folder icon and color
-  void _showCustomizeFolderBottomSheet(
-    BuildContext context,
-    VaultFolder folder,
-  ) {
-    IconData selectedIcon = folder.icon;
-    Color selectedColor = folder.color;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: StatefulBuilder(
-          builder: (context, setSheetState) => Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Handle bar
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outline.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Header with folder preview
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: selectedColor.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(selectedIcon, size: 28, color: selectedColor),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Customize "${folder.name}"',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Change icon and color',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.7),
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Icon selection section
-                Text(
-                  'Choose Icon',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 80,
-                  child: GridView.builder(
-                    scrollDirection: Axis.horizontal,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 1,
-                        ),
-                    itemCount: availableIcons.length,
-                    itemBuilder: (context, index) {
-                      final icon = availableIcons[index];
-                      final isSelected = icon == selectedIcon;
-
-                      return GestureDetector(
-                        onTap: () => setSheetState(() => selectedIcon = icon),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? selectedColor.withValues(alpha: 0.15)
-                                : Theme.of(context).colorScheme.surface,
-                            border: Border.all(
-                              color: isSelected
-                                  ? selectedColor
-                                  : Theme.of(context).colorScheme.outline
-                                        .withValues(alpha: 0.3),
-                              width: isSelected ? 2 : 1,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            icon,
-                            color: isSelected
-                                ? selectedColor
-                                : Theme.of(context).colorScheme.onSurface,
-                            size: 24,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Color selection section
-                Text(
-                  'Choose Color',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 50,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: availableColors.length,
-                    itemBuilder: (context, index) {
-                      final color = availableColors[index];
-                      final isSelected = color == selectedColor;
-
-                      return GestureDetector(
-                        onTap: () => setSheetState(() => selectedColor = color),
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: isSelected
-                                ? Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                    width: 3,
-                                  )
-                                : Border.all(
-                                    color: Theme.of(context).colorScheme.outline
-                                        .withValues(alpha: 0.3),
-                                    width: 1,
-                                  ),
-                            boxShadow: isSelected
-                                ? [
-                                    BoxShadow(
-                                      color: color.withValues(alpha: 0.4),
-                                      blurRadius: 8,
-                                      spreadRadius: 2,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: isSelected
-                              ? const Icon(
-                                  Icons.check,
-                                  color: Colors.white,
-                                  size: 20,
-                                )
-                              : null,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
-                        label: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          // Update folder appearance
-                          _customizeFolder(
-                            context,
-                            folder,
-                            selectedIcon,
-                            selectedColor,
-                          );
-                          Navigator.pop(context);
-                        },
-                        icon: const Icon(Icons.palette),
-                        label: const Text('Apply Changes'),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
- void _renameFolder(
-    BuildContext context,
-    VaultFolder folder,
-    String newName,
-  ) async {
-    final updatedFolder = folder.copyWith(name: newName);
-
-    // Update the physical .metadata.json file.
-    await StorageHelper.updateFolderMetadata(updatedFolder);
-
-    // Update the app's state.
-    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-    final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-    if (folderIndex != -1) {
-      currentFolders[folderIndex] = updatedFolder;
-      foldersNotifier.value = currentFolders;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Folder renamed to "$newName"')),
-    );
-  }
-
-  /// ✨ OVERHAULED: Uses the new StorageHelper methods.
-  void _deleteFolder(BuildContext context, VaultFolder folder) async {
-    // Delete the physical folder and its contents.
-    await StorageHelper.deleteFolder(folder);
-
-    // Update the app's state by removing the folder and any of its children.
-    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-    final List<String> idsToDelete = [folder.id];
-    
-    // Simple recursive delete logic for the in-memory list
-    void findChildren(String parentId) {
-        final children = currentFolders.where((f) => f.parentPath == parentId);
-        for (final child in children) {
-            idsToDelete.add(child.id);
-            findChildren(child.id);
-        }
-    }
-    findChildren(folder.id);
-
-    currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
+  // Update the app's state.
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+  if (folderIndex != -1) {
+    currentFolders[folderIndex] = updatedFolder;
     foldersNotifier.value = currentFolders;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Folder "${folder.name}" deleted')),
-    );
   }
 
-  /// ✨ OVERHAULED: Uses the new StorageHelper methods.
-  void _customizeFolder(
-    BuildContext context,
-    VaultFolder folder,
-    IconData newIcon,
-    Color newColor,
-  ) async {
-    final updatedFolder = folder.copyWith(icon: newIcon, color: newColor);
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Folder renamed to "$newName"')),
+  );
+}
 
-    // Update the physical .metadata.json file.
-    await StorageHelper.updateFolderMetadata(updatedFolder);
+/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+void _deleteFolder(BuildContext context, VaultFolder folder) async {
+  // Delete the physical folder and its contents.
+  await StorageHelper.deleteFolder(folder);
 
-    // Update the app's state.
-    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-    final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-    if (folderIndex != -1) {
-      currentFolders[folderIndex] = updatedFolder;
-      foldersNotifier.value = currentFolders;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Folder "${folder.name}" customized')),
-    );
+  // Update the app's state by removing the folder and any of its children.
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final List<String> idsToDelete = [folder.id];
+  
+  // Simple recursive delete logic for the in-memory list
+  void findChildren(String parentId) {
+      final children = currentFolders.where((f) => f.parentPath == parentId);
+      for (final child in children) {
+          idsToDelete.add(child.id);
+          findChildren(child.id);
+      }
   }
+  findChildren(folder.id);
+
+  currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
+  foldersNotifier.value = currentFolders;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Folder "${folder.name}" deleted')),
+  );
+}
+
+/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+void _customizeFolder(
+  BuildContext context,
+  VaultFolder folder,
+  IconData newIcon,
+  Color newColor,
+) async {
+  final updatedFolder = folder.copyWith(icon: newIcon, color: newColor);
+
+  // Update the physical .metadata.json file.
+  await StorageHelper.updateFolderMetadata(updatedFolder);
+
+  // Update the app's state.
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+  if (folderIndex != -1) {
+    currentFolders[folderIndex] = updatedFolder;
+    foldersNotifier.value = currentFolders;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Folder "${folder.name}" customized')),
+  );
 }

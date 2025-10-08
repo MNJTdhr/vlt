@@ -2,8 +2,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as p; // ✨ FIX: Added 'as p' to fix the undefined name error.
+import 'package:path/path.dart' as p;
 import 'package:open_file/open_file.dart';
+import 'package:permission_handler/permission_handler.dart'; // ✨ ADDED: Needed for file picking permissions
 import 'package:vlt/widgets/folder_card.dart';
 import 'package:vlt/widgets/folder_creator_sheet.dart';
 import 'package:vlt/data/notifiers.dart';
@@ -48,9 +49,10 @@ class _FolderViewPageState extends State<FolderViewPage>
   void _onFoldersChanged() {
     if (mounted) {
       setState(() {
-        final foundFolders = foldersNotifier.value.where((f) => f.id == widget.folder.id);
+        final foundFolders =
+            foldersNotifier.value.where((f) => f.id == widget.folder.id);
         if (foundFolders.isNotEmpty) {
-            currentFolder = foundFolders.first;
+          currentFolder = foundFolders.first;
         }
         // Also reload file/folder list from disk
         _loadFolderFiles();
@@ -82,12 +84,42 @@ class _FolderViewPageState extends State<FolderViewPage>
     OpenFile.open(file.path);
   }
 
+  /// ✨ OVERHAULED: This function now requests permission and uses the correct save method.
   Future<void> _pickAndCopyFiles(FileType type) async {
+    // 1. Request the correct permission before picking.
+    bool permissionGranted = false;
+    if (type == FileType.image) {
+      permissionGranted = await Permission.photos.request().isGranted;
+      // Fallback for older Android versions that don't have granular permissions
+      if (!permissionGranted) {
+        permissionGranted = await Permission.storage.request().isGranted;
+      }
+    } else if (type == FileType.video) {
+      permissionGranted = await Permission.videos.request().isGranted;
+      if (!permissionGranted) {
+        permissionGranted = await Permission.storage.request().isGranted;
+      }
+    } else {
+      // For general files, the manage external storage permission is the most reliable
+      permissionGranted = await Permission.manageExternalStorage.request().isGranted;
+    }
+
+    if (!permissionGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permission denied to access files.')),
+        );
+      }
+      return;
+    }
+
+    // 2. Pick the files.
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       type: type,
     );
 
+    // 3. Save the files using the updated StorageHelper method.
     if (result != null && result.files.isNotEmpty) {
       for (final file in result.files) {
         final path = file.path;
@@ -212,7 +244,6 @@ class _FolderViewPageState extends State<FolderViewPage>
                           _customizeFolder(context, f, icon, color),
                     );
                   } else {
-                    // ✨ FIX: Completed the else block to display file thumbnails.
                     final file = files[index - subfolders.length];
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(12),
