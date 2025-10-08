@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:vlt/widgets/folder_card.dart';
 import '../data/notifiers.dart';
 import 'package:vlt/pages/folder_view_page.dart';
 import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'package:vlt/widgets/folder_creator_sheet.dart';
 
 // HomePage - Main screen displaying the vault interface
 // Contains welcome section and folder grid layout with management features
@@ -22,19 +25,15 @@ class HomePage extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-                  Theme.of(
-                    context,
-                  ).colorScheme.secondary.withValues(alpha: 0.1),
+                  Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  Theme.of(context).colorScheme.secondary.withOpacity(0.1),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Theme.of(
-                  context,
-                ).colorScheme.outline.withValues(alpha: 0.2),
+                color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
               ),
             ),
             child: Column(
@@ -49,17 +48,16 @@ class HomePage extends StatelessWidget {
                 Text(
                   'Secure Vault',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Your private files are safe and encrypted',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.7),
-                  ),
+                        color:
+                            Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      ),
                 ),
               ],
             ),
@@ -73,14 +71,25 @@ class HomePage extends StatelessWidget {
             children: [
               Text(
                 'Folders',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
               ),
               TextButton.icon(
                 onPressed: () {
-                  // Show add folder bottom sheet instead of dialog
-                  _showAddFolderBottomSheet(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(20),
+                      ),
+                    ),
+                    // ✨ This was already correct from the previous step
+                    builder: (context) =>
+                        const FolderCreatorSheet(parentPath: 'root'),
+                  );
                 },
                 icon: const Icon(Icons.add),
                 label: const Text('Add'),
@@ -95,7 +104,11 @@ class HomePage extends StatelessWidget {
             child: ValueListenableBuilder<List<VaultFolder>>(
               valueListenable: foldersNotifier,
               builder: (context, folders, child) {
-                if (folders.isEmpty) {
+                // ✨ This was already correct from the previous step
+                final rootFolders =
+                    folders.where((f) => f.parentPath == 'root').toList();
+
+                if (rootFolders.isEmpty) {
                   return _buildEmptyState(context);
                 }
 
@@ -106,10 +119,37 @@ class HomePage extends StatelessWidget {
                     mainAxisSpacing: 16,
                     childAspectRatio: 1.1,
                   ),
-                  itemCount: folders.length,
+                  itemCount: rootFolders.length,
                   itemBuilder: (context, index) {
-                    final folder = folders[index];
-                    return _buildFolderCard(context, folder);
+                    final folder = rootFolders[index];
+
+                    // ✨ FIX: Calculate subfolder count on the fly.
+                    final subfolderCount = folders
+                        .where((subfolder) => subfolder.parentPath == folder.id)
+                        .length;
+
+                    // ✨ Create a new folder instance with the correct count.
+                    final folderWithCount = folder.copyWith(itemCount: subfolderCount);
+
+                    return FolderCard(
+                      // ✨ Use the new folder instance with the updated count.
+                      folder: folderWithCount,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => FolderViewPage(folder: folder),
+                          ),
+                        );
+                      },
+                      onRename: (folder, newName) {
+                        _renameFolder(context, folder, newName);
+                      },
+                      onDelete: (f) => _deleteFolder(context, f),
+                      onCustomize: (folder, icon, color) {
+                        _customizeFolder(context, folder, icon, color);
+                      },
+                    );
                   },
                 );
               },
@@ -129,25 +169,21 @@ class HomePage extends StatelessWidget {
           Icon(
             Icons.folder_open_outlined,
             size: 64,
-            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5),
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
           ),
           const SizedBox(height: 16),
           Text(
             'No folders yet',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.7),
-            ),
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap the + button to create your first folder',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.5),
-            ),
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                ),
             textAlign: TextAlign.center,
           ),
         ],
@@ -155,9 +191,8 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  // _buildFolderCard - Creates individual folder card widget with menu options
-  // Displays folder icon, name, item count with tap functionality and 3-dot menu
-  // Parameters: context for theming, folder data model
+  // NOTE: The _buildFolderCard method below is not actively used, but it has been
+  // fixed to prevent future errors.
   Widget _buildFolderCard(BuildContext context, VaultFolder folder) {
     return Card(
       elevation: 2,
@@ -168,11 +203,11 @@ class HomePage extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => FolderViewPage(folderName: folder.name),
+              // ✨ FIX: Pass the full folder object here as well
+              builder: (_) => FolderViewPage(folder: folder),
             ),
           );
         },
-
         child: Stack(
           children: [
             Padding(
@@ -180,57 +215,47 @@ class HomePage extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Folder icon with background - Colored container with folder-specific icon
                   Center(
                     child: Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: folder.color.withValues(alpha: 0.15),
+                        color: folder.color.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(folder.icon, size: 32, color: folder.color),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  // Folder name - Primary title text
                   Text(
                     folder.name,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                          fontWeight: FontWeight.w600,
+                        ),
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-
                   const SizedBox(height: 4),
-
-                  // Item count - Shows number of files in folder
                   Text(
                     '${folder.itemCount} items',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.6),
-                    ),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.6),
+                        ),
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
-
-            // Three-dot menu - Positioned at top-right corner
             Positioned(
               top: 4,
               right: 4,
               child: PopupMenuButton<String>(
                 icon: Icon(
                   Icons.more_vert,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                   size: 20,
                 ),
                 onSelected: (value) {
@@ -281,283 +306,6 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
-
-  // _showAddFolderBottomSheet - Shows bottom sheet to create new folder
-  // Allows user to enter name, select icon and color in a drawer-style interface
-  void _showAddFolderBottomSheet(BuildContext context) {
-    final TextEditingController nameController = TextEditingController();
-    IconData selectedIcon = Icons.folder;
-    Color selectedColor = Colors.blue;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: StatefulBuilder(
-          builder: (context, setSheetState) => Container(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-              left: 24,
-              right: 24,
-              top: 24,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Handle bar - Visual indicator for draggable bottom sheet
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outline.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Header with folder icon preview
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: selectedColor.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(selectedIcon, size: 28, color: selectedColor),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Create New Folder',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Choose name, icon and color',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.7),
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Folder name input
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Folder Name',
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter folder name',
-                    prefixIcon: Icon(Icons.drive_file_rename_outline),
-                  ),
-                  autofocus: true,
-                ),
-
-                const SizedBox(height: 24),
-
-                // Icon selection section
-                Text(
-                  'Choose Icon',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 80,
-                  child: GridView.builder(
-                    scrollDirection: Axis.horizontal,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 1,
-                        ),
-                    itemCount: availableIcons.length,
-                    itemBuilder: (context, index) {
-                      final icon = availableIcons[index];
-                      final isSelected = icon == selectedIcon;
-
-                      return GestureDetector(
-                        onTap: () => setSheetState(() => selectedIcon = icon),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? selectedColor.withValues(alpha: 0.15)
-                                : Theme.of(context).colorScheme.surface,
-                            border: Border.all(
-                              color: isSelected
-                                  ? selectedColor
-                                  : Theme.of(context).colorScheme.outline
-                                        .withValues(alpha: 0.3),
-                              width: isSelected ? 2 : 1,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            icon,
-                            color: isSelected
-                                ? selectedColor
-                                : Theme.of(context).colorScheme.onSurface,
-                            size: 24,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Color selection section
-                Text(
-                  'Choose Color',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 50,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: availableColors.length,
-                    itemBuilder: (context, index) {
-                      final color = availableColors[index];
-                      final isSelected = color == selectedColor;
-
-                      return GestureDetector(
-                        onTap: () => setSheetState(() => selectedColor = color),
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: isSelected
-                                ? Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                    width: 3,
-                                  )
-                                : Border.all(
-                                    color: Theme.of(context).colorScheme.outline
-                                        .withValues(alpha: 0.3),
-                                    width: 1,
-                                  ),
-                            boxShadow: isSelected
-                                ? [
-                                    BoxShadow(
-                                      color: color.withValues(alpha: 0.4),
-                                      blurRadius: 8,
-                                      spreadRadius: 2,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: isSelected
-                              ? const Icon(
-                                  Icons.check,
-                                  color: Colors.white,
-                                  size: 20,
-                                )
-                              : null,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
-                        label: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () async {
-                          final name = nameController.text.trim();
-                          if (name.isNotEmpty) {
-                            final newFolder = VaultFolder(
-                              id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
-                              name: name,
-                              icon: selectedIcon,
-                              color: selectedColor,
-                              itemCount: 0,
-                            );
-
-                            final currentFolders = List<VaultFolder>.from(
-                              foldersNotifier.value,
-                            );
-                            currentFolders.add(newFolder);
-                            foldersNotifier.value = currentFolders;
-
-                            // ✅ Create folder directory and save metadata
-                            await StorageHelper.createPersistentFolder(name);
-                            await StorageHelper.saveFoldersMetadata(
-                              currentFolders,
-                            );
-
-                            Navigator.pop(context);
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Folder "$name" created successfully!',
-                                ),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                          }
-                        },
-
-                        icon: const Icon(Icons.add),
-                        label: const Text('Create Folder'),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   // _showRenameFolderBottomSheet - Shows bottom sheet to rename existing folder
   void _showRenameFolderBottomSheet(BuildContext context, VaultFolder folder) {
     final TextEditingController nameController = TextEditingController(

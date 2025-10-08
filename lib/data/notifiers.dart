@@ -1,51 +1,22 @@
 import 'package:flutter/material.dart';
+import '../models/vault_folder.dart'; // ✅ Using the official model
 import '../utils/storage_helper.dart';
 
+/// --- NOTIFIERS ---
 
-// Navigation state notifier
+/// Current selected page index (e.g. Home, Settings)
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
 
-// Theme state notifier (true = dark mode, false = light mode)
+/// App theme toggle (true = dark mode, false = light mode)
 ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
 
-// Folders list notifier - manages dynamic folder list
+/// Folder list notifier — updates UI reactively
 ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
 
-// Folder data model
-class VaultFolder {
-  final String id;
-  String name; // Changed to mutable for renaming
-  final IconData icon;
-  final Color color;
-  int itemCount; // Changed to mutable for updating count
 
-  VaultFolder({
-    required this.id,
-    required this.name,
-    required this.icon,
-    required this.color,
-    this.itemCount = 0,
-  });
+/// --- INITIAL DATA HELPERS ---
 
-  // Copy method for updating folder properties
-  VaultFolder copyWith({
-    String? id,
-    String? name,
-    IconData? icon,
-    Color? color,
-    int? itemCount,
-  }) {
-    return VaultFolder(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      icon: icon ?? this.icon,
-      color: color ?? this.color,
-      itemCount: itemCount ?? this.itemCount,
-    );
-  }
-}
-
-// Default folders - now moved to initialization function
+/// Creates a few starter folders on first launch
 List<VaultFolder> getDefaultFolders() {
   return [
     VaultFolder(
@@ -54,6 +25,7 @@ List<VaultFolder> getDefaultFolders() {
       icon: Icons.photo_library,
       color: Colors.blue,
       itemCount: 0,
+      parentPath: 'root',
     ),
     VaultFolder(
       id: 'videos_${DateTime.now().millisecondsSinceEpoch + 1}',
@@ -61,6 +33,7 @@ List<VaultFolder> getDefaultFolders() {
       icon: Icons.video_library,
       color: Colors.red,
       itemCount: 0,
+      parentPath: 'root',
     ),
     VaultFolder(
       id: 'documents_${DateTime.now().millisecondsSinceEpoch + 2}',
@@ -68,6 +41,7 @@ List<VaultFolder> getDefaultFolders() {
       icon: Icons.folder,
       color: Colors.orange,
       itemCount: 0,
+      parentPath: 'root',
     ),
     VaultFolder(
       id: 'notes_${DateTime.now().millisecondsSinceEpoch + 3}',
@@ -75,11 +49,12 @@ List<VaultFolder> getDefaultFolders() {
       icon: Icons.note,
       color: Colors.green,
       itemCount: 0,
+      parentPath: 'root',
     ),
   ];
 }
 
-// Initialize folders with default values
+/// Called once at startup to load saved folders or create defaults
 Future<void> initializeFolders() async {
   final savedFolders = await StorageHelper.loadFoldersMetadata();
 
@@ -92,7 +67,9 @@ Future<void> initializeFolders() async {
 }
 
 
-// Available icons for new folders
+/// --- CONSTANTS FOR UI OPTIONS ---
+
+/// Set of selectable icons shown during folder creation
 const List<IconData> availableIcons = [
   Icons.folder,
   Icons.photo_library,
@@ -108,7 +85,7 @@ const List<IconData> availableIcons = [
   Icons.school,
 ];
 
-// Available colors for new folders
+/// Set of selectable colors shown during folder creation
 const List<Color> availableColors = [
   Colors.blue,
   Colors.red,

@@ -1,89 +1,92 @@
 // lib/pages/folder_view_page.dart
-
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:open_file/open_file.dart';
-
-import '../data/notifiers.dart';
-import '../utils/storage_helper.dart';
+import 'package:vlt/widgets/folder_card.dart';
+import 'package:vlt/widgets/folder_creator_sheet.dart';
+import 'package:vlt/data/notifiers.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/models/vault_folder.dart';
 
 class FolderViewPage extends StatefulWidget {
-  final String folderName;
+  final VaultFolder folder;
 
-  const FolderViewPage({super.key, required this.folderName});
+  const FolderViewPage({super.key, required this.folder});
 
   @override
   State<FolderViewPage> createState() => _FolderViewPageState();
 }
 
-// Add 'SingleTickerProviderStateMixin' to use an AnimationController for the FAB animation.
 class _FolderViewPageState extends State<FolderViewPage>
     with SingleTickerProviderStateMixin {
   late VaultFolder currentFolder;
-  List<FileSystemEntity> folderFiles = []; // Stores files inside the folder
+  List<FileSystemEntity> folderFiles = [];
 
-  // --- FAB Animation State ---
   late AnimationController _fabAnimationController;
-  bool isFabMenuOpen = false; // Controls the FAB menu's open/closed state.
+  bool isFabMenuOpen = false;
 
   @override
   void initState() {
     super.initState();
-    currentFolder = foldersNotifier.value.firstWhere(
-      (f) => f.name == widget.folderName,
-      orElse: () => foldersNotifier.value.first,
-    );
+    currentFolder = widget.folder;
 
-    // Initialize the AnimationController for the FAB open/close animation.
     _fabAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
 
+    foldersNotifier.addListener(_onFoldersChanged);
     _loadFolderFiles();
   }
 
   @override
   void dispose() {
-    // Dispose the controller when the widget is removed to free up resources.
     _fabAnimationController.dispose();
+    foldersNotifier.removeListener(_onFoldersChanged);
     super.dispose();
   }
 
-  /// Toggles the Floating Action Button menu between open and closed states.
+  void _onFoldersChanged() {
+    if (mounted) {
+      setState(() {
+        currentFolder = foldersNotifier.value.firstWhere(
+          (f) => f.id == widget.folder.id,
+          orElse: () => widget.folder,
+        );
+      });
+    }
+  }
+
   void _toggleFabMenu() {
     setState(() {
       isFabMenuOpen = !isFabMenuOpen;
       if (isFabMenuOpen) {
-        // If the menu is opening, play the animation forward.
         _fabAnimationController.forward();
       } else {
-        // If the menu is closing, play the animation in reverse.
         _fabAnimationController.reverse();
       }
     });
   }
 
-  /// Loads all files from the specified folder directory.
   Future<void> _loadFolderFiles() async {
-    final base = await StorageHelper.getVaultRootDirectory();
-    final folderPath = Directory('${base.path}/${widget.folderName}');
-    if (await folderPath.exists()) {
-      final files = folderPath.listSync();
+    final fullPath = currentFolder.parentPath == 'root'
+        ? currentFolder.name
+        : '${currentFolder.parentPath}/${currentFolder.name}';
+
+    final contents = await StorageHelper.getFolderContents(fullPath);
+    if (mounted) {
       setState(() {
-        folderFiles = files;
+        folderFiles = contents;
       });
     }
   }
 
-  /// Opens the selected file using the device's default application.
   void _openFile(File file) {
     OpenFile.open(file.path);
   }
 
-  /// Opens the file picker to select files of a specific type and copies them to the vault.
   Future<void> _pickAndCopyFiles(FileType type) async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
@@ -91,37 +94,31 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
 
     if (result != null && result.files.isNotEmpty) {
+      final folderPath = currentFolder.parentPath == 'root'
+          ? currentFolder.name
+          : '${currentFolder.parentPath}/${currentFolder.name}';
+
       for (final file in result.files) {
         final path = file.path;
         if (path != null) {
           final originalFile = File(path);
           await StorageHelper.saveFileToVault(
-            folderName: widget.folderName,
+            folderName: folderPath,
             file: originalFile,
           );
         }
       }
-
-      if (!mounted) return;
       await _loadFolderFiles();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.files.length} file(s) copied')),
-      );
-    } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No files selected')),
+        SnackBar(content: Text('${result.files.length} file(s) copied')),
       );
     }
   }
 
-  /// Handles the action when a FAB menu item is tapped.
   Future<void> _handleOption(String type) async {
-    // Close the FAB menu before performing the action.
-    if (isFabMenuOpen) {
-      _toggleFabMenu();
-    }
+    if (isFabMenuOpen) _toggleFabMenu();
 
     switch (type) {
       case 'Add Images':
@@ -134,113 +131,38 @@ class _FolderViewPageState extends State<FolderViewPage>
         await _pickAndCopyFiles(FileType.any);
         break;
       case 'Add Folder':
-        _showComingSoonDialog('Add Folder');
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (ctx) => FolderCreatorSheet(
+            parentPath: currentFolder.id,
+            onFolderCreated: (folder) async {
+              await _loadFolderFiles();
+            },
+          ),
+        );
         break;
     }
   }
 
-  /// Shows a dialog for features that are not yet implemented.
-  void _showComingSoonDialog(String title) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: const Text('This feature will be available soon.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("OK"),
-          )
-        ],
-      ),
-    );
-  }
-
-  // --- File Type Checkers ---
-  bool _isImage(String path) {
-    final ext = p.extension(path).toLowerCase();
-    return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext);
-  }
-
-  bool _isVideo(String path) {
-    final ext = p.extension(path).toLowerCase();
-    return ['.mp4', '.mov', '.avi', '.mkv'].contains(ext);
-  }
-
-  /// Builds the appropriate thumbnail for a given file.
-  Widget _buildThumbnail(File file) {
-    final path = file.path;
-
-    if (_isImage(path)) {
-      return GestureDetector(
-        onTap: () => _openFile(file),
-        child: Image.file(file, fit: BoxFit.cover),
-      );
-    } else if (_isVideo(path)) {
-      return GestureDetector(
-        onTap: () => _openFile(file),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Container(color: Colors.black12),
-            const Center(
-                child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
-          ],
-        ),
-      );
-    } else {
-      return GestureDetector(
-        onTap: () => _openFile(file),
-        child: const Center(child: Icon(Icons.insert_drive_file, size: 40)),
-      );
-    }
-  }
-
-  /// Builds a small, labeled Floating Action Button for the expandable menu.
-  /// This widget represents one of the pop-up options.
-  Widget _buildMiniFab({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-  }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // The label for the button, styled to look clean.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: kElevationToShadow[1],
-          ),
-          child: Text(label,
-              style:
-                  TextStyle(color: currentFolder.color, fontWeight: FontWeight.bold)),
-        ),
-        const SizedBox(width: 12),
-        // The small FAB itself.
-        SizedBox(
-          width: 42,
-          height: 42,
-          child: FloatingActionButton(
-            heroTag: null, // Use null heroTag for multiple FABs on one screen.
-            onPressed: onPressed,
-            backgroundColor: currentFolder.color,
-            child: Icon(icon, color: Colors.white, size: 22),
-          ),
-        ),
-      ],
-    );
+  List<VaultFolder> _getSubfolders() {
+    return foldersNotifier.value
+        .where((f) => f.parentPath == currentFolder.id)
+        .toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isEmpty = folderFiles.isEmpty;
+    final subfolders = _getSubfolders();
+    final files = folderFiles.whereType<File>().toList();
+    final isEmpty = files.isEmpty && subfolders.isEmpty;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.folderName),
+        title: Text(currentFolder.name),
         backgroundColor: currentFolder.color,
         foregroundColor: Colors.white,
       ),
@@ -251,48 +173,75 @@ class _FolderViewPageState extends State<FolderViewPage>
                 children: [
                   Icon(Icons.folder_open, size: 64, color: currentFolder.color),
                   const SizedBox(height: 16),
-                  Text('The "${widget.folderName}" folder is empty.',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'The "${currentFolder.name}" folder is empty.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 8),
-                  Text('Click the + button to add content.',
-                      style: Theme.of(context).textTheme.bodyMedium),
+                  Text(
+                    'Click the + button to add content.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
                 ],
               ),
             )
           : Padding(
-              padding: const EdgeInsets.all(12.0),
+              padding: const EdgeInsets.all(16.0),
               child: GridView.builder(
-                itemCount: folderFiles.length,
+                itemCount: subfolders.length + files.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 1.1,
                 ),
                 itemBuilder: (context, index) {
-                  final file = folderFiles[index];
-                  if (file is File) {
+                  if (index < subfolders.length) {
+                    final subfolder = subfolders[index];
+
+                    // ✨ FIX: Calculate the count for this subfolder.
+                    final subfolderCount = foldersNotifier.value
+                        .where((f) => f.parentPath == subfolder.id)
+                        .length;
+
+                    // ✨ Create a new instance with the correct count.
+                    final folderWithCount =
+                        subfolder.copyWith(itemCount: subfolderCount);
+
+                    return FolderCard(
+                      // ✨ Use the updated folder instance.
+                      folder: folderWithCount,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => FolderViewPage(folder: subfolder),
+                          ),
+                        );
+                      },
+                      onRename: (f, newName) =>
+                          _renameFolder(context, f, newName),
+                      onDelete: (f) => _deleteFolder(context, f),
+                      onCustomize: (f, icon, color) =>
+                          _customizeFolder(context, f, icon, color),
+                    );
+                  } else {
+                    final file = files[index - subfolders.length];
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: _buildThumbnail(file),
                     );
                   }
-                  return const SizedBox.shrink();
                 },
               ),
             ),
-
-      // --- Refactored Floating Action Button ---
-      // This Column holds the expandable menu and the main FAB.
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // The expandable menu is wrapped in an AnimatedOpacity widget
-          // to create a smooth fade-in/out effect.
           AnimatedOpacity(
             opacity: isFabMenuOpen ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 200),
-            // The Visibility widget ensures the menu items are not interactable when hidden.
             child: Visibility(
               visible: isFabMenuOpen,
               child: Column(
@@ -327,18 +276,147 @@ class _FolderViewPageState extends State<FolderViewPage>
               ),
             ),
           ),
-          // This is the main Floating Action Button.
           FloatingActionButton(
             onPressed: _toggleFabMenu,
             backgroundColor: currentFolder.color,
-            // The RotationTransition animates the '+' icon to an 'x' when the menu opens.
             child: RotationTransition(
-              turns: Tween(begin: 0.0, end: 0.125).animate(_fabAnimationController),
+              turns: Tween(
+                begin: 0.0,
+                end: 0.125,
+              ).animate(_fabAnimationController),
               child: const Icon(Icons.add, color: Colors.white, size: 28),
             ),
           ),
         ],
       ),
+    );
+  }
+
+
+  void _renameFolder(
+    BuildContext context,
+    VaultFolder folder,
+    String newName,
+  ) async {
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    final index = currentFolders.indexWhere((f) => f.id == folder.id);
+    if (index != -1) {
+      currentFolders[index] = folder.copyWith(name: newName);
+      foldersNotifier.value = currentFolders;
+      await StorageHelper.saveFoldersMetadata(currentFolders);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
+      }
+    }
+  }
+
+  void _deleteFolder(BuildContext context, VaultFolder folder) async {
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    currentFolders.removeWhere((f) => f.id == folder.id);
+    foldersNotifier.value = currentFolders;
+    await StorageHelper.saveFoldersMetadata(currentFolders);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Folder "${folder.name}" deleted')),
+      );
+    }
+  }
+
+  void _customizeFolder(
+    BuildContext context,
+    VaultFolder folder,
+    IconData icon,
+    Color color,
+  ) async {
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    final index = currentFolders.indexWhere((f) => f.id == folder.id);
+    if (index != -1) {
+      currentFolders[index] = folder.copyWith(icon: icon, color: color);
+      foldersNotifier.value = currentFolders;
+      await StorageHelper.saveFoldersMetadata(currentFolders);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Folder "${folder.name}" customized')),
+        );
+      }
+    }
+  }
+
+  Widget _buildThumbnail(File file) {
+    final path = file.path;
+    if (_isImage(path)) {
+      return GestureDetector(
+        onTap: () => _openFile(file),
+        child: Image.file(file, fit: BoxFit.cover),
+      );
+    } else if (_isVideo(path)) {
+      return GestureDetector(
+        onTap: () => _openFile(file),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: Colors.black12),
+            const Center(
+              child: Icon(Icons.play_circle, color: Colors.white, size: 36),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return GestureDetector(
+        onTap: () => _openFile(file),
+        child: const Center(child: Icon(Icons.insert_drive_file, size: 40)),
+      );
+    }
+  }
+
+  bool _isImage(String path) => [
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.gif',
+      ].contains(p.extension(path).toLowerCase());
+
+  bool _isVideo(String path) =>
+      ['.mp4', '.mov'].contains(p.extension(path).toLowerCase());
+
+  Widget _buildMiniFab({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: kElevationToShadow[1],
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: currentFolder.color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 42,
+          height: 42,
+          child: FloatingActionButton(
+            heroTag: null,
+            onPressed: onPressed,
+            backgroundColor: currentFolder.color,
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+        ),
+      ],
     );
   }
 }

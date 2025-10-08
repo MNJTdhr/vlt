@@ -25,7 +25,7 @@ class VaultApp extends StatelessWidget {
           theme: ThemeData(
             useMaterial3: true,
             colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.deepPurple,
+              seedColor: Colors.blue,
               brightness: isDarkMode ? Brightness.dark : Brightness.light,
             ),
           ),

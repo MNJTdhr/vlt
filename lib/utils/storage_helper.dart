@@ -3,51 +3,46 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as path;
 import '../data/notifiers.dart';
+import '../models/vault_folder.dart'; // Required for metadata parsing
 
 class StorageHelper {
   static const String folderMetadataKey = 'vault_folder_metadata';
 
-  /// ✅ Get the base vault directory: /storage/emulated/0/Android/media/com.vlt.app/.vlt/
+  /// ✅ Returns the base directory of the vault
+  /// e.g., /storage/emulated/0/Android/media/com.vlt.app/.vlt
   static Future<Directory> getBaseDirectory() async {
     final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
     if (!(await dir.exists())) {
-      await dir.create(recursive: true); // Create directory if not present
+      await dir.create(recursive: true);
     }
     return dir;
   }
 
-  /// ✅ Alias method for consistent naming
+  /// ✅ Shortcut for naming consistency
   static Future<Directory> getVaultRootDirectory() => getBaseDirectory();
 
-  /// ✅ Ask for manage external storage permission
+  /// ✅ Asks for MANAGE_EXTERNAL_STORAGE permission
   static Future<bool> requestStoragePermission() async {
     final status = await Permission.manageExternalStorage.request();
     return status.isGranted;
   }
 
   /// ✅ Save folder metadata list to SharedPreferences as JSON
+  /// Stores all UI + path-related info for folder recovery
   static Future<void> saveFoldersMetadata(List<VaultFolder> folders) async {
     final prefs = await SharedPreferences.getInstance();
 
-    final List<Map<String, dynamic>> jsonList = folders.map((folder) {
-      return {
-        'id': folder.id,
-        'name': folder.name,
-        'icon': folder.icon.codePoint,
-        'color': folder.color.toARGB32(), // Save full color value
-        'itemCount': folder.itemCount,
-      };
-    }).toList();
+    final List<Map<String, dynamic>> jsonList = folders.map((f) => f.toJson()).toList();
 
-    prefs.setString(folderMetadataKey, jsonEncode(jsonList));
+    await prefs.setString(folderMetadataKey, jsonEncode(jsonList));
   }
 
   /// ✅ Load folder metadata from SharedPreferences
+  /// Decodes full folder list including UI and path details
   static Future<List<VaultFolder>> loadFoldersMetadata() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString(folderMetadataKey);
@@ -55,24 +50,17 @@ class StorageHelper {
     if (data == null) return [];
 
     final List<dynamic> jsonList = jsonDecode(data);
-    return jsonList.map((json) {
-      return VaultFolder(
-        id: json['id'],
-        name: json['name'],
-        icon: IconData(json['icon'], fontFamily: 'MaterialIcons'),
-        color: Color(json['color']),
-        itemCount: json['itemCount'],
-      );
-    }).toList();
+    return jsonList.map((json) => VaultFolder.fromJson(json)).toList();
   }
 
-  /// ✅ Create a main folder inside .vlt directory
-  static Future<Directory?> createPersistentFolder(String folderName) async {
+  /// ✅ Create a folder (main or nested) inside the vault
+  /// Takes full path like: "Work" or "root/Projects/Reports"
+  static Future<Directory?> createPersistentFolder(String fullPath) async {
     final permissionGranted = await requestStoragePermission();
     if (!permissionGranted) return null;
 
-    final baseDir = await getBaseDirectory();
-    final folder = Directory('${baseDir.path}/$folderName');
+    final root = await getVaultRootDirectory();
+    final folder = Directory(path.join(root.path, fullPath));
 
     if (!(await folder.exists())) {
       await folder.create(recursive: true);
@@ -80,28 +68,34 @@ class StorageHelper {
     return folder;
   }
 
-  /// ✅ Create subfolder inside a given parent folder in .vlt
-  static Future<void> createPersistentSubfolder(
-    String parentFolder,
-    String subfolderName,
-  ) async {
+  /// ✅ Rename folder from oldPath to newPath
+  /// Paths can include nested structure
+  static Future<void> renamePersistentFolder(String oldPath, String newPath) async {
     final root = await getVaultRootDirectory();
-    final subfolder = Directory(
-      path.join(root.path, parentFolder, subfolderName),
-    );
+    final oldFolder = Directory(path.join(root.path, oldPath));
+    final newFolder = Directory(path.join(root.path, newPath));
 
-    if (!(await subfolder.exists())) {
-      await subfolder.create(recursive: true);
+    if (await oldFolder.exists()) {
+      await oldFolder.rename(newFolder.path);
     }
   }
 
-  /// ✅ Save file to a vault folder
-  ///
-  /// If `context` is provided, shows an AlertDialog on error
+  /// ✅ Delete folder at a given path (recursive delete)
+  static Future<void> deletePersistentFolder(String fullPath) async {
+    final root = await getVaultRootDirectory();
+    final folder = Directory(path.join(root.path, fullPath));
+
+    if (await folder.exists()) {
+      await folder.delete(recursive: true);
+    }
+  }
+
+  /// ✅ Save a file into a folder (nested path allowed)
+  /// If context is passed, error dialog will show
   static Future<File?> saveFileToVault({
     required String folderName,
     required File file,
-    BuildContext? context, // Optional context for showing error dialog
+    BuildContext? context,
   }) async {
     try {
       final root = await getVaultRootDirectory();
@@ -117,7 +111,6 @@ class StorageHelper {
 
       return newFile;
     } catch (e) {
-      // ✅ Use safe post-frame callback to avoid context errors after async gaps
       if (context != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (context.mounted) {
@@ -140,5 +133,20 @@ class StorageHelper {
 
       return null;
     }
+  }
+
+  /// ✅ Load all files and folders under a given path
+  /// Used to populate FolderViewPage content
+  static Future<List<FileSystemEntity>> getFolderContents(String fullPath) async {
+    try {
+      final root = await getVaultRootDirectory();
+      final folder = Directory(path.join(root.path, fullPath));
+      if (await folder.exists()) {
+        return folder.listSync(recursive: false);
+      }
+    } catch (e) {
+      debugPrint('Error reading folder contents: $e');
+    }
+    return [];
   }
 }
