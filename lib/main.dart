@@ -1,14 +1,40 @@
 // main.dart
 import 'package:flutter/material.dart';
-import 'data/notifiers.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'data/notifiers.dart'; // ✨ FIX: This import defines 'selectedPageNotifier' and other notifiers.
 import 'pages/home_page.dart';
 import 'pages/browser_page.dart';
 import 'pages/settings_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeFolders();
+  await _requestStoragePermission();
+
+  // This logic now correctly loads folders from disk or creates the defaults physically
+  final loadedFolders = await StorageHelper.loadAllFoldersFromDisk();
+  if (loadedFolders.isEmpty) {
+    final defaultFolders = getDefaultFolders();
+    for (final folder in defaultFolders) {
+      // This creates the physical folder and its .metadata.json file
+      await StorageHelper.createFolder(folder);
+    }
+    foldersNotifier.value = defaultFolders;
+  } else {
+    foldersNotifier.value = loadedFolders;
+  }
+
   runApp(const VaultApp());
+}
+
+Future<void> _requestStoragePermission() async {
+  var status = await Permission.manageExternalStorage.request();
+  if (status.isDenied) {
+    debugPrint('Storage permission was denied.');
+  } else if (status.isPermanentlyDenied) {
+    debugPrint('Storage permission permanently denied. Opening app settings.');
+    await openAppSettings();
+  }
 }
 
 class VaultApp extends StatelessWidget {
@@ -77,7 +103,9 @@ class MainScreen extends StatelessWidget {
                         key: ValueKey(isDarkMode),
                       ),
                     ),
-                    tooltip: isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                    tooltip: isDarkMode
+                        ? 'Switch to Light Mode'
+                        : 'Switch to Dark Mode',
                   );
                 },
               ),

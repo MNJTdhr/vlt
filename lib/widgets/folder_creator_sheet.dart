@@ -1,3 +1,4 @@
+// lib/widgets/folder_creator_sheet.dart
 import 'package:flutter/material.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
@@ -23,30 +24,9 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
   final TextEditingController nameController = TextEditingController();
   IconData selectedIcon = Icons.folder;
   Color selectedColor = Colors.blue;
-
-  final List<IconData> availableIcons = [
-    Icons.folder,
-    Icons.photo_library,
-    Icons.video_library,
-    Icons.note,
-    Icons.music_note,
-    Icons.picture_as_pdf,
-    Icons.description,
-    Icons.archive,
-    Icons.favorite,
-    Icons.star,
-    Icons.lock,
-  ];
-
-  final List<Color> availableColors = [
-    Colors.blue,
-    Colors.red,
-    Colors.green,
-    Colors.orange,
-    Colors.purple,
-    Colors.teal,
-    Colors.pink,
-  ];
+  
+  // ✨ NOTE: Using the globally defined constants from notifiers.dart
+  // is a better practice, but this works fine too.
 
   @override
   Widget build(BuildContext context) {
@@ -216,30 +196,29 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
     );
   }
 
+  /// ✨ OVERHAULED: This function now uses the new file-based storage logic.
   Future<void> _createFolder() async {
     final name = nameController.text.trim();
     if (name.isEmpty) return;
 
-    final id = 'folder_${DateTime.now().millisecondsSinceEpoch}';
-    final parent = widget.parentPath;
-    final fullPath =
-        parent == 'root' ? name : '$parent/$name';
-
     final newFolder = VaultFolder(
-      id: id,
+      // The physical folder will be named after this ID, not the display name.
+      id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       icon: selectedIcon,
       color: selectedColor,
       itemCount: 0,
-      parentPath: parent,
+      parentPath: widget.parentPath,
+      creationDate: DateTime.now(), // Add the creation date
     );
 
+    // Create the physical folder and its .metadata.json file.
+    await StorageHelper.createFolder(newFolder);
+
+    // Update the app's state.
     final updatedList = List<VaultFolder>.from(foldersNotifier.value);
     updatedList.add(newFolder);
     foldersNotifier.value = updatedList;
-
-    await StorageHelper.createPersistentFolder(fullPath);
-    await StorageHelper.saveFoldersMetadata(updatedList);
 
     if (widget.onFolderCreated != null) {
       widget.onFolderCreated!(newFolder);

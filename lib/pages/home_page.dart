@@ -1,3 +1,4 @@
+// lib/pages/home_page.dart
 import 'package:flutter/material.dart';
 import 'package:vlt/widgets/folder_card.dart';
 import '../data/notifiers.dart';
@@ -6,8 +7,6 @@ import 'package:vlt/utils/storage_helper.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/widgets/folder_creator_sheet.dart';
 
-// HomePage - Main screen displaying the vault interface
-// Contains welcome section and folder grid layout with management features
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -18,7 +17,7 @@ class HomePage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Welcome section - Displays app branding and security message
+          // Welcome section
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
@@ -62,10 +61,8 @@ class HomePage extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 24),
-
-          // Folders section header - Title and add button for folder management
+          // Folders section header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -86,7 +83,6 @@ class HomePage extends StatelessWidget {
                         top: Radius.circular(20),
                       ),
                     ),
-                    // ✨ This was already correct from the previous step
                     builder: (context) =>
                         const FolderCreatorSheet(parentPath: 'root'),
                   );
@@ -96,22 +92,18 @@ class HomePage extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 16),
-
-          // Folders grid - Dynamic grid displaying all vault folders
+          // Folders grid
           Expanded(
             child: ValueListenableBuilder<List<VaultFolder>>(
               valueListenable: foldersNotifier,
               builder: (context, folders, child) {
-                // ✨ This was already correct from the previous step
                 final rootFolders =
                     folders.where((f) => f.parentPath == 'root').toList();
 
                 if (rootFolders.isEmpty) {
                   return _buildEmptyState(context);
                 }
-
                 return GridView.builder(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
@@ -122,17 +114,13 @@ class HomePage extends StatelessWidget {
                   itemCount: rootFolders.length,
                   itemBuilder: (context, index) {
                     final folder = rootFolders[index];
-
-                    // ✨ FIX: Calculate subfolder count on the fly.
                     final subfolderCount = folders
                         .where((subfolder) => subfolder.parentPath == folder.id)
                         .length;
-
-                    // ✨ Create a new folder instance with the correct count.
-                    final folderWithCount = folder.copyWith(itemCount: subfolderCount);
+                    final folderWithCount =
+                        folder.copyWith(itemCount: subfolderCount);
 
                     return FolderCard(
-                      // ✨ Use the new folder instance with the updated count.
                       folder: folderWithCount,
                       onTap: () {
                         Navigator.push(
@@ -159,7 +147,6 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
-
   // _buildEmptyState - Shows when no folders exist
   Widget _buildEmptyState(BuildContext context) {
     return Center(
@@ -700,72 +687,77 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  void _renameFolder(
+ void _renameFolder(
     BuildContext context,
     VaultFolder folder,
     String newName,
   ) async {
+    final updatedFolder = folder.copyWith(name: newName);
+
+    // Update the physical .metadata.json file.
+    await StorageHelper.updateFolderMetadata(updatedFolder);
+
+    // Update the app's state.
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-
     if (folderIndex != -1) {
-      currentFolders[folderIndex] = folder.copyWith(name: newName);
+      currentFolders[folderIndex] = updatedFolder;
       foldersNotifier.value = currentFolders;
-
-      // ✅ Save updated metadata
-      await StorageHelper.saveFoldersMetadata(currentFolders);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Folder renamed to "$newName"'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
     }
-  }
-
-  // _deleteFolder - Removes folder from the list
-  void _deleteFolder(BuildContext context, VaultFolder folder) async {
-    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-    currentFolders.removeWhere((f) => f.id == folder.id);
-    foldersNotifier.value = currentFolders;
-
-    // ✅ Save updated metadata
-    await StorageHelper.saveFoldersMetadata(currentFolders);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Folder "${folder.name}" deleted'),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text('Folder renamed to "$newName"')),
     );
   }
 
+  /// ✨ OVERHAULED: Uses the new StorageHelper methods.
+  void _deleteFolder(BuildContext context, VaultFolder folder) async {
+    // Delete the physical folder and its contents.
+    await StorageHelper.deleteFolder(folder);
+
+    // Update the app's state by removing the folder and any of its children.
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    final List<String> idsToDelete = [folder.id];
+    
+    // Simple recursive delete logic for the in-memory list
+    void findChildren(String parentId) {
+        final children = currentFolders.where((f) => f.parentPath == parentId);
+        for (final child in children) {
+            idsToDelete.add(child.id);
+            findChildren(child.id);
+        }
+    }
+    findChildren(folder.id);
+
+    currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
+    foldersNotifier.value = currentFolders;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" deleted')),
+    );
+  }
+
+  /// ✨ OVERHAULED: Uses the new StorageHelper methods.
   void _customizeFolder(
     BuildContext context,
     VaultFolder folder,
     IconData newIcon,
     Color newColor,
   ) async {
+    final updatedFolder = folder.copyWith(icon: newIcon, color: newColor);
+
+    // Update the physical .metadata.json file.
+    await StorageHelper.updateFolderMetadata(updatedFolder);
+
+    // Update the app's state.
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
-
     if (folderIndex != -1) {
-      currentFolders[folderIndex] = folder.copyWith(
-        icon: newIcon,
-        color: newColor,
-      );
+      currentFolders[folderIndex] = updatedFolder;
       foldersNotifier.value = currentFolders;
-
-      // ✅ Save updated metadata
-      await StorageHelper.saveFoldersMetadata(currentFolders);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Folder "${folder.name}" customized successfully!'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
     }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" customized')),
+    );
   }
 }

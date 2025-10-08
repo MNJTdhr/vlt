@@ -2,7 +2,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as p;
+import 'package:path/path.dart' as p; // ✨ FIX: Added 'as p' to fix the undefined name error.
 import 'package:open_file/open_file.dart';
 import 'package:vlt/widgets/folder_card.dart';
 import 'package:vlt/widgets/folder_creator_sheet.dart';
@@ -12,7 +12,6 @@ import 'package:vlt/models/vault_folder.dart';
 
 class FolderViewPage extends StatefulWidget {
   final VaultFolder folder;
-
   const FolderViewPage({super.key, required this.folder});
 
   @override
@@ -31,12 +30,10 @@ class _FolderViewPageState extends State<FolderViewPage>
   void initState() {
     super.initState();
     currentFolder = widget.folder;
-
     _fabAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
-
     foldersNotifier.addListener(_onFoldersChanged);
     _loadFolderFiles();
   }
@@ -51,10 +48,12 @@ class _FolderViewPageState extends State<FolderViewPage>
   void _onFoldersChanged() {
     if (mounted) {
       setState(() {
-        currentFolder = foldersNotifier.value.firstWhere(
-          (f) => f.id == widget.folder.id,
-          orElse: () => widget.folder,
-        );
+        final foundFolders = foldersNotifier.value.where((f) => f.id == widget.folder.id);
+        if (foundFolders.isNotEmpty) {
+            currentFolder = foundFolders.first;
+        }
+        // Also reload file/folder list from disk
+        _loadFolderFiles();
       });
     }
   }
@@ -71,11 +70,7 @@ class _FolderViewPageState extends State<FolderViewPage>
   }
 
   Future<void> _loadFolderFiles() async {
-    final fullPath = currentFolder.parentPath == 'root'
-        ? currentFolder.name
-        : '${currentFolder.parentPath}/${currentFolder.name}';
-
-    final contents = await StorageHelper.getFolderContents(fullPath);
+    final contents = await StorageHelper.getFolderContents(currentFolder);
     if (mounted) {
       setState(() {
         folderFiles = contents;
@@ -94,16 +89,12 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
 
     if (result != null && result.files.isNotEmpty) {
-      final folderPath = currentFolder.parentPath == 'root'
-          ? currentFolder.name
-          : '${currentFolder.parentPath}/${currentFolder.name}';
-
       for (final file in result.files) {
         final path = file.path;
         if (path != null) {
           final originalFile = File(path);
           await StorageHelper.saveFileToVault(
-            folderName: folderPath,
+            folder: currentFolder,
             file: originalFile,
           );
         }
@@ -139,8 +130,8 @@ class _FolderViewPageState extends State<FolderViewPage>
           ),
           builder: (ctx) => FolderCreatorSheet(
             parentPath: currentFolder.id,
-            onFolderCreated: (folder) async {
-              await _loadFolderFiles();
+            onFolderCreated: (folder) {
+              // Notifier will handle the state update automatically
             },
           ),
         );
@@ -198,18 +189,13 @@ class _FolderViewPageState extends State<FolderViewPage>
                 itemBuilder: (context, index) {
                   if (index < subfolders.length) {
                     final subfolder = subfolders[index];
-
-                    // ✨ FIX: Calculate the count for this subfolder.
                     final subfolderCount = foldersNotifier.value
                         .where((f) => f.parentPath == subfolder.id)
                         .length;
-
-                    // ✨ Create a new instance with the correct count.
                     final folderWithCount =
                         subfolder.copyWith(itemCount: subfolderCount);
 
                     return FolderCard(
-                      // ✨ Use the updated folder instance.
                       folder: folderWithCount,
                       onTap: () {
                         Navigator.push(
@@ -226,9 +212,10 @@ class _FolderViewPageState extends State<FolderViewPage>
                           _customizeFolder(context, f, icon, color),
                     );
                   } else {
+                    // ✨ FIX: Completed the else block to display file thumbnails.
                     final file = files[index - subfolders.length];
                     return ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                       child: _buildThumbnail(file),
                     );
                   }
@@ -292,35 +279,43 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
   }
 
-
   void _renameFolder(
     BuildContext context,
     VaultFolder folder,
     String newName,
   ) async {
+    final updatedFolder = folder.copyWith(name: newName);
+    await StorageHelper.updateFolderMetadata(updatedFolder);
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     final index = currentFolders.indexWhere((f) => f.id == folder.id);
     if (index != -1) {
-      currentFolders[index] = folder.copyWith(name: newName);
+      currentFolders[index] = updatedFolder;
       foldersNotifier.value = currentFolders;
-      await StorageHelper.saveFoldersMetadata(currentFolders);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
-      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
     }
   }
 
   void _deleteFolder(BuildContext context, VaultFolder folder) async {
+    await StorageHelper.deleteFolder(folder);
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-    currentFolders.removeWhere((f) => f.id == folder.id);
+    final List<String> idsToDelete = [folder.id];
+    void findChildren(String parentId) {
+      final children = currentFolders.where((f) => f.parentPath == parentId);
+      for (final child in children) {
+        idsToDelete.add(child.id);
+        findChildren(child.id);
+      }
+    }
+
+    findChildren(folder.id);
+    currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
     foldersNotifier.value = currentFolders;
-    await StorageHelper.saveFoldersMetadata(currentFolders);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Folder "${folder.name}" deleted')),
-      );
+          SnackBar(content: Text('Folder "${folder.name}" deleted')));
     }
   }
 
@@ -330,17 +325,17 @@ class _FolderViewPageState extends State<FolderViewPage>
     IconData icon,
     Color color,
   ) async {
+    final updatedFolder = folder.copyWith(icon: icon, color: color);
+    await StorageHelper.updateFolderMetadata(updatedFolder);
     final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
     final index = currentFolders.indexWhere((f) => f.id == folder.id);
     if (index != -1) {
-      currentFolders[index] = folder.copyWith(icon: icon, color: color);
+      currentFolders[index] = updatedFolder;
       foldersNotifier.value = currentFolders;
-      await StorageHelper.saveFoldersMetadata(currentFolders);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Folder "${folder.name}" customized')),
-        );
-      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Folder "${folder.name}" customized')));
     }
   }
 
@@ -367,7 +362,15 @@ class _FolderViewPageState extends State<FolderViewPage>
     } else {
       return GestureDetector(
         onTap: () => _openFile(file),
-        child: const Center(child: Icon(Icons.insert_drive_file, size: 40)),
+        child: Container(
+          alignment: Alignment.center,
+          color: Theme.of(context).colorScheme.surfaceVariant,
+          child: Icon(
+            Icons.insert_drive_file,
+            size: 40,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       );
     }
   }
@@ -377,10 +380,11 @@ class _FolderViewPageState extends State<FolderViewPage>
         '.jpeg',
         '.png',
         '.gif',
+        '.webp',
       ].contains(p.extension(path).toLowerCase());
 
   bool _isVideo(String path) =>
-      ['.mp4', '.mov'].contains(p.extension(path).toLowerCase());
+      ['.mp4', '.mov', '.avi', '.mkv'].contains(p.extension(path).toLowerCase());
 
   Widget _buildMiniFab({
     required IconData icon,

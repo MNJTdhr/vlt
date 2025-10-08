@@ -1,9 +1,10 @@
+// lib/data/notifiers.dart
 import 'package:flutter/material.dart';
-import '../models/vault_folder.dart'; // ✅ Using the official model
-import '../utils/storage_helper.dart';
+import '../models/vault_folder.dart';
 
 /// --- NOTIFIERS ---
 
+// ✨ FIX: Added the missing notifiers back. Your main.dart needs these.
 /// Current selected page index (e.g. Home, Settings)
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
 
@@ -11,59 +12,52 @@ ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
 ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
 
 /// Folder list notifier — updates UI reactively
-ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
+final foldersNotifier = ValueNotifier<List<VaultFolder>>([]);
 
 
 /// --- INITIAL DATA HELPERS ---
 
-/// Creates a few starter folders on first launch
+/// Creates a few starter folders on first launch. This is called from main.dart.
 List<VaultFolder> getDefaultFolders() {
+  final now = DateTime.now();
   return [
     VaultFolder(
-      id: 'photos_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'photos_${now.millisecondsSinceEpoch}',
       name: 'Photos',
       icon: Icons.photo_library,
       color: Colors.blue,
       itemCount: 0,
       parentPath: 'root',
+      creationDate: now,
     ),
     VaultFolder(
-      id: 'videos_${DateTime.now().millisecondsSinceEpoch + 1}',
+      id: 'videos_${now.millisecondsSinceEpoch + 1}',
       name: 'Videos',
       icon: Icons.video_library,
       color: Colors.red,
       itemCount: 0,
       parentPath: 'root',
+      creationDate: now,
     ),
     VaultFolder(
-      id: 'documents_${DateTime.now().millisecondsSinceEpoch + 2}',
+      id: 'documents_${now.millisecondsSinceEpoch + 2}',
       name: 'Documents',
       icon: Icons.folder,
       color: Colors.orange,
       itemCount: 0,
       parentPath: 'root',
+      creationDate: now,
     ),
     VaultFolder(
-      id: 'notes_${DateTime.now().millisecondsSinceEpoch + 3}',
+      id: 'notes_${now.millisecondsSinceEpoch + 3}',
       name: 'Notes',
       icon: Icons.note,
       color: Colors.green,
       itemCount: 0,
       parentPath: 'root',
+      creationDate: now,
     ),
   ];
-}
-
-/// Called once at startup to load saved folders or create defaults
-Future<void> initializeFolders() async {
-  final savedFolders = await StorageHelper.loadFoldersMetadata();
-
-  if (savedFolders.isNotEmpty) {
-    foldersNotifier.value = savedFolders;
-  } else {
-    foldersNotifier.value = getDefaultFolders();
-    await StorageHelper.saveFoldersMetadata(foldersNotifier.value);
-  }
 }
 
 
