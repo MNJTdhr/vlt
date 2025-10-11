@@ -114,14 +114,11 @@ class HomePage extends StatelessWidget {
                   itemCount: rootFolders.length,
                   itemBuilder: (context, index) {
                     final folder = rootFolders[index];
-                    final subfolderCount = folders
-                        .where((subfolder) => subfolder.parentPath == folder.id)
-                        .length;
-                    final folderWithCount =
-                        folder.copyWith(itemCount: subfolderCount);
-
+                    
+                    // The itemCount is now directly from the notifier, which is kept up-to-date.
+                    // No need for on-the-fly calculation here anymore.
                     return FolderCard(
-                      folder: folderWithCount,
+                      folder: folder,
                       onTap: () {
                         Navigator.push(
                           context,
@@ -177,23 +174,17 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
-  
-  // ✨ NOTE: The helper methods below this line are no longer part of the HomePage widget.
-  // They are now defined as standalone functions within the file for clarity.
 }
 
-/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+/// Renames a folder's metadata.
 void _renameFolder(
   BuildContext context,
   VaultFolder folder,
   String newName,
 ) async {
   final updatedFolder = folder.copyWith(name: newName);
-
-  // Update the physical .metadata.json file.
   await StorageHelper.updateFolderMetadata(updatedFolder);
 
-  // Update the app's state.
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
   if (folderIndex != -1) {
@@ -201,21 +192,20 @@ void _renameFolder(
     foldersNotifier.value = currentFolders;
   }
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Folder renamed to "$newName"')),
-  );
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder renamed to "$newName"')),
+    );
+  }
 }
 
-/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+/// Deletes a folder and all its contents, then refreshes item counts.
 void _deleteFolder(BuildContext context, VaultFolder folder) async {
-  // Delete the physical folder and its contents.
   await StorageHelper.deleteFolder(folder);
 
-  // Update the app's state by removing the folder and any of its children.
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
   final List<String> idsToDelete = [folder.id];
   
-  // Simple recursive delete logic for the in-memory list
   void findChildren(String parentId) {
       final children = currentFolders.where((f) => f.parentPath == parentId);
       for (final child in children) {
@@ -228,12 +218,17 @@ void _deleteFolder(BuildContext context, VaultFolder folder) async {
   currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
   foldersNotifier.value = currentFolders;
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Folder "${folder.name}" deleted')),
-  );
+  // ✨ FIX: Refresh the item counts for all folders.
+  await refreshItemCounts();
+
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" deleted')),
+    );
+  }
 }
 
-/// ✨ OVERHAULED: Uses the new StorageHelper methods.
+/// Customizes a folder's metadata.
 void _customizeFolder(
   BuildContext context,
   VaultFolder folder,
@@ -241,18 +236,18 @@ void _customizeFolder(
   Color newColor,
 ) async {
   final updatedFolder = folder.copyWith(icon: newIcon, color: newColor);
-
-  // Update the physical .metadata.json file.
   await StorageHelper.updateFolderMetadata(updatedFolder);
 
-  // Update the app's state.
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
   final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
   if (folderIndex != -1) {
     currentFolders[folderIndex] = updatedFolder;
     foldersNotifier.value = currentFolders;
   }
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Folder "${folder.name}" customized')),
-  );
+
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" customized')),
+    );
+  }
 }

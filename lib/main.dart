@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vlt/utils/storage_helper.dart';
-import 'data/notifiers.dart'; // ✨ FIX: This import defines 'selectedPageNotifier' and other notifiers.
+import 'data/notifiers.dart';
 import 'pages/home_page.dart';
 import 'pages/browser_page.dart';
 import 'pages/settings_page.dart';
@@ -11,18 +11,19 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _requestStoragePermission();
 
-  // This logic now correctly loads folders from disk or creates the defaults physically
   final loadedFolders = await StorageHelper.loadAllFoldersFromDisk();
   if (loadedFolders.isEmpty) {
     final defaultFolders = getDefaultFolders();
     for (final folder in defaultFolders) {
-      // This creates the physical folder and its .metadata.json file
       await StorageHelper.createFolder(folder);
     }
     foldersNotifier.value = defaultFolders;
   } else {
     foldersNotifier.value = loadedFolders;
   }
+
+  // ✨ NEW: Refresh counts on startup
+  await refreshItemCounts();
 
   runApp(const VaultApp());
 }

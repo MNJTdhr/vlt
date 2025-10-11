@@ -24,9 +24,6 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
   final TextEditingController nameController = TextEditingController();
   IconData selectedIcon = Icons.folder;
   Color selectedColor = Colors.blue;
-  
-  // ✨ NOTE: The local 'availableIcons' and 'availableColors' lists have been removed
-  // to use the global constants from 'notifiers.dart', ensuring consistency.
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +35,7 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
           right: 24,
           top: 24,
         ),
-        child: SingleChildScrollView( // ✨ WRAPPED in SingleChildScrollView to prevent overflow
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,7 +107,7 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
                 height: 60,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  children: availableIcons.map((icon) { // ✨ USING global constant
+                  children: availableIcons.map((icon) {
                     return GestureDetector(
                       onTap: () => setState(() => selectedIcon = icon),
                       child: Container(
@@ -137,11 +134,11 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
               // Color picker
               _buildLabel('Choose Color'),
               const SizedBox(height: 12),
-              SizedBox( // ✨ WRAPPED in SizedBox to allow horizontal scrolling on smaller screens
+              SizedBox(
                 height: 40,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  children: availableColors.map((color) { // ✨ USING global constant
+                  children: availableColors.map((color) {
                     final isSelected = color == selectedColor;
                     return GestureDetector(
                       onTap: () => setState(() => selectedColor = color),
@@ -204,11 +201,9 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
     );
   }
 
-  /// ✨ OVERHAULED: This function now uses the new file-based storage logic.
   Future<void> _createFolder() async {
     final name = nameController.text.trim();
     if (name.isEmpty) {
-      // Optional: Show a small error message if the name is empty
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Folder name cannot be empty')),
       );
@@ -216,29 +211,29 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
     }
 
     final newFolder = VaultFolder(
-      // The physical folder will be named after this ID, not the display name.
       id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       icon: selectedIcon,
       color: selectedColor,
       itemCount: 0,
       parentPath: widget.parentPath,
-      creationDate: DateTime.now(), // Add the creation date
+      creationDate: DateTime.now(),
     );
 
-    // Create the physical folder and its .metadata.json file.
     await StorageHelper.createFolder(newFolder);
 
-    // Update the app's state.
-    final updatedList = List<VaultFolder>.from(foldersNotifier.value);
-    updatedList.add(newFolder);
+    // Update the app's state list
+    final updatedList = List<VaultFolder>.from(foldersNotifier.value)..add(newFolder);
     foldersNotifier.value = updatedList;
+
+    // ✨ FIX: Refresh the item counts for all folders to update the parent's count.
+    await refreshItemCounts();
 
     if (widget.onFolderCreated != null) {
       widget.onFolderCreated!(newFolder);
     }
 
-    if (context.mounted) {
+    if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Folder "$name" created')),

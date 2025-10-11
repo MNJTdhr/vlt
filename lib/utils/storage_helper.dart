@@ -3,13 +3,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path/path.dart' as path;
+import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
+import '../data/notifiers.dart';
 import '../models/vault_folder.dart';
 
 class StorageHelper {
-  static const String _metadataFileName = '.metadata.json';
+  static const String _folderMetadataFile = '.metadata.json';
+  static const String _fileIndexFile = '.index.json';
+  static const String _recycleBinId = '.recycle_bin';
+  static const _uuid = Uuid();
 
-  /// Returns the base directory of the vault.
   static Future<Directory> getVaultRootDirectory() async {
     final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
     if (!(await dir.exists())) {
@@ -18,61 +22,96 @@ class StorageHelper {
     return dir;
   }
 
-  /// Asks for necessary storage permissions.
-  static Future<bool> requestStoragePermission() async {
-    final status = await Permission.manageExternalStorage.request();
-    return status.isGranted;
+  static Future<Directory> getRecycleBinDirectory() async {
+    final root = await getVaultRootDirectory();
+    final dir = Directory(p.join(root.path, _recycleBinId));
+    if (!(await dir.exists())) {
+      await dir.create(recursive: true);
+    }
+    return dir;
   }
 
-  /// ✨ NEW: Recursively finds a folder's directory by its ID.
+  static Future<bool> requestStoragePermission() async {
+    return await Permission.manageExternalStorage.request().isGranted;
+  }
+
   static Future<Directory?> findFolderDirectoryById(String folderId) async {
     final root = await getVaultRootDirectory();
-    final entities = root.listSync(recursive: true);
-    for (var entity in entities) {
-      if (entity is Directory && path.basename(entity.path) == folderId) {
-        return entity;
-      }
+    if (folderId == _recycleBinId) return getRecycleBinDirectory();
+    
+    try {
+        final entities = root.listSync(recursive: true);
+        for (var entity in entities) {
+            if (entity is Directory && p.basename(entity.path) == folderId) {
+                return entity;
+            }
+        }
+    } catch (e) {
+        debugPrint('Error finding folder by ID: $e');
     }
     return null;
   }
-  
-  /// ✨ NEW: Saves a single folder's metadata to its own directory.
-  static Future<void> saveFolderMetadata(VaultFolder folder) async {
+
+  static Future<void> _saveFolderMetadata(VaultFolder folder) async {
     Directory? folderDir;
     if (folder.parentPath == 'root') {
       final root = await getVaultRootDirectory();
-      folderDir = Directory(path.join(root.path, folder.id));
+      folderDir = Directory(p.join(root.path, folder.id));
     } else {
       final parentDir = await findFolderDirectoryById(folder.parentPath);
       if (parentDir != null) {
-        folderDir = Directory(path.join(parentDir.path, folder.id));
+        folderDir = Directory(p.join(parentDir.path, folder.id));
       }
     }
 
     if (folderDir == null) return;
-    
     if (!await folderDir.exists()) {
-       await folderDir.create(recursive: true);
+      await folderDir.create(recursive: true);
     }
 
-    final metadataFile = File(path.join(folderDir.path, _metadataFileName));
+    final metadataFile = File(p.join(folderDir.path, _folderMetadataFile));
     await metadataFile.writeAsString(jsonEncode(folder.toJson()));
   }
 
-  /// ✨ NEW: Creates a new folder, including its physical directory and metadata file.
+  static Future<List<VaultFile>> loadVaultFileIndex(VaultFolder folder) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null) return [];
+
+    final indexFile = File(p.join(folderDir.path, _fileIndexFile));
+    if (!await indexFile.exists()) return [];
+    
+    try {
+      final content = await indexFile.readAsString();
+      if (content.isEmpty) return [];
+      final List<dynamic> jsonList = jsonDecode(content);
+      return jsonList.map((json) => VaultFile.fromJson(json)).toList();
+    } catch (e) {
+      debugPrint("Error reading file index for ${folder.name}: $e");
+      return [];
+    }
+  }
+
+  static Future<void> saveVaultFileIndex(VaultFolder folder, List<VaultFile> files) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null) return;
+    if (!await folderDir.exists()) {
+        await folderDir.create(recursive: true);
+    }
+
+    final indexFile = File(p.join(folderDir.path, _fileIndexFile));
+    final jsonList = files.map((file) => file.toJson()).toList();
+    await indexFile.writeAsString(jsonEncode(jsonList));
+  }
+  
   static Future<void> createFolder(VaultFolder newFolder) async {
     if (!await requestStoragePermission()) return;
-    await saveFolderMetadata(newFolder);
+    await _saveFolderMetadata(newFolder);
   }
 
-  /// ✨ NEW: Updates a folder's metadata (for rename, customize).
   static Future<void> updateFolderMetadata(VaultFolder updatedFolder) async {
-    // Renaming the folder name is just updating the metadata file.
-    // The physical directory name (which is the folder ID) does not change.
-    await saveFolderMetadata(updatedFolder);
+    await _saveFolderMetadata(updatedFolder);
   }
 
-  /// ✨ NEW: Deletes a folder's physical directory.
   static Future<void> deleteFolder(VaultFolder folderToDelete) async {
     final folderDir = await findFolderDirectoryById(folderToDelete.id);
     if (folderDir != null && await folderDir.exists()) {
@@ -80,57 +119,145 @@ class StorageHelper {
     }
   }
 
-  /// ✨ OVERHAULED: Loads all folders by scanning the disk for metadata files.
   static Future<List<VaultFolder>> loadAllFoldersFromDisk() async {
     final root = await getVaultRootDirectory();
     final folders = <VaultFolder>[];
 
-    if (!await root.exists()) {
-      return folders;
-    }
+    if (!await root.exists()) return folders;
 
-    final entities = root.listSync(recursive: true);
-    for (final entity in entities) {
-      if (entity is File && path.basename(entity.path) == _metadataFileName) {
-        try {
-          final content = await entity.readAsString();
-          final folder = VaultFolder.fromJson(jsonDecode(content));
-          folders.add(folder);
-        } catch (e) {
-          debugPrint('Error reading metadata file ${entity.path}: $e');
+    try {
+        final entities = root.listSync(recursive: true);
+        for (final entity in entities) {
+            if (entity is File && p.basename(entity.path) == _folderMetadataFile) {
+                try {
+                    final content = await entity.readAsString();
+                    folders.add(VaultFolder.fromJson(jsonDecode(content)));
+                } catch (e) {
+                    debugPrint('Error reading metadata file ${entity.path}: $e');
+                }
+            }
         }
-      }
+    } catch (e) {
+        debugPrint('Error loading folders from disk: $e');
     }
     return folders;
   }
   
-  // This function can remain largely the same, but we need to find the folder path differently
-  static Future<File?> saveFileToVault({
+  static Future<void> saveFileToVault({
     required VaultFolder folder,
     required File file,
   }) async {
     final folderDir = await findFolderDirectoryById(folder.id);
-    if (folderDir == null) return null;
+    if (folderDir == null) return;
 
-    try {
-      final filename = path.basename(file.path);
-      final newFilePath = path.join(folderDir.path, filename);
-      return await file.copy(newFilePath);
-    } catch (e) {
-      debugPrint('Failed to save file: $e');
-      return null;
-    }
+    final newFileName = '${_uuid.v4()}${p.extension(file.path)}';
+    final newFilePath = p.join(folderDir.path, newFileName);
+    
+    await file.copy(newFilePath);
+
+    final vaultFile = VaultFile(
+      id: newFileName,
+      fileName: p.basename(file.path),
+      originalPath: file.path,
+      dateAdded: DateTime.now(),
+      originalParentPath: folder.id,
+    );
+
+    final fileIndex = await loadVaultFileIndex(folder);
+    fileIndex.add(vaultFile);
+    await saveVaultFileIndex(folder, fileIndex);
   }
 
-  // This function can also remain, but it's better to pass the folder object
-  static Future<List<FileSystemEntity>> getFolderContents(VaultFolder folder) async {
+  static Future<void> moveFileToRecycleBin(VaultFile file, VaultFolder sourceFolder) async {
+    final sourceDir = await findFolderDirectoryById(sourceFolder.id);
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (sourceDir == null) return;
+
+    final sourceFile = File(p.join(sourceDir.path, file.id));
+    if (await sourceFile.exists()) {
+      await sourceFile.rename(p.join(recycleBinDir.path, file.id));
+    }
+
+    final sourceIndex = await loadVaultFileIndex(sourceFolder);
+    sourceIndex.removeWhere((f) => f.id == file.id);
+    await saveVaultFileIndex(sourceFolder, sourceIndex);
+
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final recycleBinIndex = await loadVaultFileIndex(recycleBinFolder);
+    
+    final recycledFile = file.copyWith(
+      isInRecycleBin: true,
+      deletionDate: DateTime.now(),
+      originalParentPath: sourceFolder.id,
+    );
+    recycleBinIndex.add(recycledFile);
+    await saveVaultFileIndex(recycleBinFolder, recycleBinIndex);
+  }
+
+  static Future<void> restoreFileFromRecycleBin(VaultFile fileToRestore, List<VaultFolder> allFolders) async {
+    final destinationFolder = allFolders.firstWhere(
+        (f) => f.id == fileToRestore.originalParentPath,
+        orElse: () => allFolders.firstWhere((f) => f.parentPath == 'root'),
+    );
+
+    final destinationDir = await findFolderDirectoryById(destinationFolder.id);
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (destinationDir == null) return;
+    
+    final sourceFile = File(p.join(recycleBinDir.path, fileToRestore.id));
+    if (await sourceFile.exists()) {
+      await sourceFile.rename(p.join(destinationDir.path, fileToRestore.id));
+    }
+    
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final recycleBinIndex = await loadVaultFileIndex(recycleBinFolder);
+    recycleBinIndex.removeWhere((f) => f.id == fileToRestore.id);
+    await saveVaultFileIndex(recycleBinFolder, recycleBinIndex);
+    
+    final destinationIndex = await loadVaultFileIndex(destinationFolder);
+    final restoredFile = fileToRestore.copyWith(isInRecycleBin: false, setDeletionDateToNull: true);
+    destinationIndex.add(restoredFile);
+    await saveVaultFileIndex(destinationFolder, destinationIndex);
+  }
+
+  static Future<List<VaultFile>> loadRecycledFiles() async {
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    return await loadVaultFileIndex(recycleBinFolder);
+  }
+
+  static Future<void> permanentlyDeleteFile(VaultFile file) async {
+    final recycleBinDir = await getRecycleBinDirectory();
+    final fileToDelete = File(p.join(recycleBinDir.path, file.id));
+    if (await fileToDelete.exists()) {
+      await fileToDelete.delete();
+    }
+
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final index = await loadVaultFileIndex(recycleBinFolder);
+    index.removeWhere((f) => f.id == file.id);
+    await saveVaultFileIndex(recycleBinFolder, index);
+  }
+
+  static Future<void> permanentlyDeleteAllRecycledFiles() async {
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (await recycleBinDir.exists()) {
+        final entities = recycleBinDir.listSync();
+        for(var entity in entities) {
+            await entity.delete(recursive: true);
+        }
+    }
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    await saveVaultFileIndex(recycleBinFolder, []);
+  }
+
+  static Future<List<File>> getFolderContents(VaultFolder folder) async {
     final folderDir = await findFolderDirectoryById(folder.id);
     if (folderDir == null || !await folderDir.exists()) return [];
-    
+
     try {
-      // Return everything except the metadata file itself
-      return folderDir.listSync(recursive: false)
-          .where((entity) => path.basename(entity.path) != _metadataFileName)
+      final entities = folderDir.listSync(recursive: false);
+      return entities.whereType<File>()
+          .where((file) => !p.basename(file.path).startsWith('.'))
           .toList();
     } catch (e) {
       debugPrint('Error reading folder contents: $e');

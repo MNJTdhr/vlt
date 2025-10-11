@@ -1,0 +1,2848 @@
+[==== notifiers.dart ===
+// lib/data/notifiers.dart
+import 'package:flutter/material.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'dart:io'; // ✨ ADDED: Needed for File type
+import 'package:vlt/utils/storage_helper.dart'; // ✨ ADDED: Needed for refresh function
+
+
+/// --- NOTIFIERS ---
+ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
+ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
+ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
+
+
+/// --- FOLDER DATA HELPERS ---
+
+List<VaultFolder> getDefaultFolders() {
+  final now = DateTime.now();
+  return [
+    VaultFolder(
+      id: 'photos_${now.millisecondsSinceEpoch}',
+      name: 'Photos',
+      icon: Icons.photo_library,
+      color: Colors.blue,
+      itemCount: 0,
+      parentPath: 'root',
+      creationDate: now,
+    ),
+    VaultFolder(
+      id: 'videos_${now.millisecondsSinceEpoch + 1}',
+      name: 'Videos',
+      icon: Icons.video_library,
+      color: Colors.red,
+      itemCount: 0,
+      parentPath: 'root',
+      creationDate: now,
+    ),
+    VaultFolder(
+      id: 'documents_${now.millisecondsSinceEpoch + 2}',
+      name: 'Documents',
+      icon: Icons.folder,
+      color: Colors.orange,
+      itemCount: 0,
+      parentPath: 'root',
+      creationDate: now,
+    ),
+    VaultFolder(
+      id: 'notes_${now.millisecondsSinceEpoch + 3}',
+      name: 'Notes',
+      icon: Icons.note,
+      color: Colors.green,
+      itemCount: 0,
+      parentPath: 'root',
+      creationDate: now,
+    ),
+  ];
+}
+
+/// ✨ NEW: Central function to refresh all item counts.
+Future<void> refreshItemCounts() async {
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final List<VaultFolder> foldersWithRefreshedCounts = [];
+
+  for (final folder in currentFolders) {
+    // Get physical files
+    final contents = await StorageHelper.getFolderContents(folder);
+    final fileCount = contents.whereType<File>().length;
+
+    // Get subfolders from our in-memory list
+    final subfolderCount = currentFolders.where((sub) => sub.parentPath == folder.id).length;
+
+    // Create a new folder instance with the updated total count
+    foldersWithRefreshedCounts.add(folder.copyWith(itemCount: subfolderCount + fileCount));
+  }
+
+  // Update the notifier to rebuild the UI with correct counts
+  foldersNotifier.value = foldersWithRefreshedCounts;
+}
+
+/// --- CONSTANTS FOR UI OPTIONS ---
+
+/// Set of selectable icons shown during folder creation
+const List<IconData> availableIcons = [
+  Icons.folder,
+  Icons.photo_library,
+  Icons.video_library,
+  Icons.note,
+  Icons.music_note,
+  Icons.picture_as_pdf,
+  Icons.description,
+  Icons.archive,
+  Icons.favorite,
+  Icons.star,
+  Icons.work,
+  Icons.school,
+];
+
+/// Set of selectable colors shown during folder creation
+const List<Color> availableColors = [
+  Colors.blue,
+  Colors.red,
+  Colors.green,
+  Colors.orange,
+  Colors.purple,
+  Colors.teal,
+  Colors.pink,
+  Colors.indigo,
+  Colors.amber,
+  Colors.cyan,
+  Colors.lime,
+  Colors.deepOrange,
+];
+=== end of notifiers.dart ===]
+
+[==== vault_folder.dart ===
+// lib/models/vault_folder.dart
+import 'package:flutter/material.dart';
+
+/// Represents a single folder in the vault.
+class VaultFolder {
+  /// Unique ID for this folder (used for tracking, renaming, deletion)
+  final String id;
+
+  /// Visible name of the folder (e.g., "Photos", "Work")
+  final String name;
+
+  /// Folder icon shown in the UI
+  final IconData icon;
+
+  /// Folder color used for UI themes
+  final Color color;
+
+  /// Number of items in the folder (files + subfolders)
+  final int itemCount;
+
+  /// The ID of the folder’s parent ("root" for top-level folders)
+  final String parentPath;
+
+  /// The date and time the folder was created.
+  final DateTime creationDate;
+
+  /// Constructor to initialize all required properties
+  const VaultFolder({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.color,
+    required this.itemCount,
+    required this.parentPath,
+    required this.creationDate,
+  });
+
+  /// Create a new folder based on an existing one with changes
+  VaultFolder copyWith({
+    String? id,
+    String? name,
+    IconData? icon,
+    Color? color,
+    int? itemCount,
+    String? parentPath,
+    DateTime? creationDate,
+  }) {
+    return VaultFolder(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      icon: icon ?? this.icon,
+      color: color ?? this.color,
+      itemCount: itemCount ?? this.itemCount,
+      parentPath: parentPath ?? this.parentPath,
+      creationDate: creationDate ?? this.creationDate,
+    );
+  }
+
+  /// Convert to JSON for file persistence
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'iconCodePoint': icon.codePoint,
+    'iconFontFamily': icon.fontFamily,
+    'iconFontPackage': icon.fontPackage,
+    'color': color.value,
+    'itemCount': itemCount,
+    'parentPath': parentPath,
+    'creationDate': creationDate.toIso8601String(),
+  };
+
+  /// Load from JSON map into usable VaultFolder object
+  factory VaultFolder.fromJson(Map<String, dynamic> json) {
+    return VaultFolder(
+      id: json['id'],
+      name: json['name'],
+      icon: IconData(
+        json['iconCodePoint'],
+        fontFamily: json['iconFontFamily'],
+        fontPackage: json['iconFontPackage'],
+      ),
+      color: Color(json['color']),
+      itemCount: json['itemCount'],
+      parentPath: json['parentPath'] ?? 'root',
+      creationDate: json['creationDate'] != null
+          ? DateTime.parse(json['creationDate'])
+          : DateTime.now(),
+    );
+  }
+}
+
+// ✨ --- CORRECTED VaultFile DATA MODEL --- ✨
+
+/// Represents a single file within a vault folder.
+class VaultFile {
+  /// Unique ID for this file.
+  final String id;
+
+  /// The name of the file on disk (e.g., "image1.jpg").
+  final String fileName;
+
+  /// The original path of the file on the device before import.
+  final String originalPath;
+
+  /// The date and time the file was added to the vault.
+  final DateTime dateAdded;
+
+  /// A flag to indicate if the file is in the recycle bin.
+  final bool isInRecycleBin;
+
+  /// The date the file was moved to the recycle bin (for auto-purge features).
+  final DateTime? deletionDate;
+  // ✨ FIX: Stores the ID of the folder where the file originally lived.
+  final String originalParentPath;
+
+  const VaultFile({
+    required this.id,
+    required this.fileName,
+    required this.originalPath,
+    required this.dateAdded,
+    this.isInRecycleBin = false,
+    this.deletionDate,
+    required this.originalParentPath, // ✨ ADDED
+  });
+
+  /// Creates a new instance with updated properties.
+  VaultFile copyWith({
+    String? id,
+    String? fileName,
+    String? originalPath,
+    DateTime? dateAdded,
+    bool? isInRecycleBin,
+    bool setDeletionDateToNull = false,
+    DateTime? deletionDate,
+    String? originalParentPath, // ✨ ADDED
+  }) {
+    return VaultFile(
+      id: id ?? this.id,
+      fileName: fileName ?? this.fileName,
+      originalPath: originalPath ?? this.originalPath,
+      dateAdded: dateAdded ?? this.dateAdded,
+      isInRecycleBin: isInRecycleBin ?? this.isInRecycleBin,
+      deletionDate: setDeletionDateToNull
+          ? null
+          : (deletionDate ?? this.deletionDate),
+      originalParentPath:
+          originalParentPath ?? this.originalParentPath, // ✨ ADDED
+    );
+  }
+
+  /// Converts the object to a JSON map for file persistence.
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'fileName': fileName,
+    'originalPath': originalPath,
+    'dateAdded': dateAdded.toIso8601String(),
+    'isInRecycleBin': isInRecycleBin,
+    'deletionDate': deletionDate?.toIso8601String(),
+    'originalParentPath': originalParentPath, // ✨ ADDED
+  };
+
+  /// Creates a VaultFile object from a JSON map.
+  factory VaultFile.fromJson(Map<String, dynamic> json) {
+    return VaultFile(
+      id: json['id'],
+      fileName: json['fileName'],
+      originalPath: json['originalPath'],
+      dateAdded: DateTime.parse(json['dateAdded']),
+      isInRecycleBin: json['isInRecycleBin'] ?? false,
+      deletionDate: json['deletionDate'] != null
+          ? DateTime.parse(json['deletionDate'])
+          : null,
+      // ✨ ADDED: Load the original path, with a fallback for safety.
+      originalParentPath: json['originalParentPath'] ?? 'root',
+    );
+  }
+}
+
+=== end of vault_folder.dart ===]
+
+[==== browser_page.dart ===
+// lib/pages/browser_pages.dart
+import 'package:flutter/material.dart';
+
+class BrowserPage extends StatelessWidget {
+  const BrowserPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.explore_outlined,
+            size: 64,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Browser',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'File browser will be implemented here',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+=== end of browser_page.dart ===]
+
+[==== folder_view_page.dart ===
+// lib/pages/folder_view_page.dart
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:vlt/pages/photo_view_page.dart';
+import 'package:vlt/widgets/folder_card.dart';
+import 'package:vlt/widgets/folder_creator_sheet.dart';
+import 'package:vlt/data/notifiers.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/models/vault_folder.dart';
+
+class FolderViewPage extends StatefulWidget {
+  final VaultFolder folder;
+  const FolderViewPage({super.key, required this.folder});
+
+  @override
+  State<FolderViewPage> createState() => _FolderViewPageState();
+}
+
+class _FolderViewPageState extends State<FolderViewPage>
+    with SingleTickerProviderStateMixin {
+  late VaultFolder currentFolder;
+  List<File> folderFiles = [];
+  List<VaultFile> _vaultFiles = [];
+
+  late AnimationController _fabAnimationController;
+  bool isFabMenuOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    currentFolder = widget.folder;
+    _fabAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    foldersNotifier.addListener(_onFoldersChanged);
+    _loadAllFolderContents();
+  }
+
+  @override
+  void dispose() {
+    _fabAnimationController.dispose();
+    foldersNotifier.removeListener(_onFoldersChanged);
+    super.dispose();
+  }
+
+  void _onFoldersChanged() {
+    if (mounted) {
+      setState(() {
+        final foundFolders =
+            foldersNotifier.value.where((f) => f.id == widget.folder.id);
+        if (foundFolders.isNotEmpty) {
+          currentFolder = foundFolders.first;
+        }
+        _loadAllFolderContents();
+      });
+    }
+  }
+
+  /// Load both real files and metadata for this folder.
+  Future<void> _loadAllFolderContents() async {
+    final physicalFiles = await StorageHelper.getFolderContents(currentFolder);
+    final fileMetadata = await StorageHelper.loadVaultFileIndex(currentFolder);
+
+    if (mounted) {
+      setState(() {
+        physicalFiles.sort((a, b) {
+          final aIndex =
+              fileMetadata.indexWhere((vf) => vf.id == p.basename(a.path));
+          final bIndex =
+              fileMetadata.indexWhere((vf) => vf.id == p.basename(b.path));
+          return aIndex.compareTo(bIndex);
+        });
+        folderFiles = physicalFiles;
+        _vaultFiles = fileMetadata;
+      });
+    }
+  }
+
+  void _toggleFabMenu() {
+    setState(() {
+      isFabMenuOpen = !isFabMenuOpen;
+      if (isFabMenuOpen) {
+        _fabAnimationController.forward();
+      } else {
+        _fabAnimationController.reverse();
+      }
+    });
+  }
+
+  Future<void> _pickAndCopyFiles(FileType type) async {
+    bool permissionGranted = false;
+
+    if (type == FileType.image) {
+      permissionGranted = await Permission.photos.request().isGranted ||
+          await Permission.storage.request().isGranted;
+    } else if (type == FileType.video) {
+      permissionGranted = await Permission.videos.request().isGranted ||
+          await Permission.storage.request().isGranted;
+    } else {
+      permissionGranted =
+          await Permission.manageExternalStorage.request().isGranted;
+    }
+
+    if (!permissionGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permission denied to access files.')),
+        );
+      }
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: type,
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      for (final file in result.files) {
+        final path = file.path;
+        if (path != null) {
+          final originalFile = File(path);
+          await StorageHelper.saveFileToVault(
+            folder: currentFolder,
+            file: originalFile,
+          );
+        }
+      }
+      await refreshItemCounts();
+      await _loadAllFolderContents();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.files.length} file(s) copied')),
+      );
+    }
+  }
+
+  List<VaultFolder> _getSubfolders() {
+    return foldersNotifier.value
+        .where((f) => f.parentPath == currentFolder.id)
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final subfolders = _getSubfolders();
+    final files = folderFiles;
+    final isEmpty = files.isEmpty && subfolders.isEmpty;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(currentFolder.name),
+        backgroundColor: currentFolder.color,
+        foregroundColor: Colors.white,
+      ),
+      body: isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.folder_open, size: 64, color: currentFolder.color),
+                  const SizedBox(height: 16),
+                  Text(
+                    'The "${currentFolder.name}" folder is empty.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Click the + button to add content.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: GridView.builder(
+                itemCount: subfolders.length + files.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemBuilder: (context, index) {
+                  // 📁 Subfolders
+                  if (index < subfolders.length) {
+                    final subfolder = subfolders[index];
+                    return FolderCard(
+                      folder: subfolder,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => FolderViewPage(folder: subfolder),
+                          ),
+                        );
+                      },
+                      // ✅ Added missing callbacks
+                      onRename: (f, newName) =>
+                          _renameFolder(context, f, newName),
+                      onDelete: (f) => _deleteFolder(context, f),
+                      onCustomize: (f, icon, color) =>
+                          _customizeFolder(context, f, icon, color),
+                    );
+                  }
+
+                  // 📷 Files
+                  final fileIndex = index - subfolders.length;
+                  final physicalFile = files[fileIndex];
+                  final vaultFile = _vaultFiles.firstWhere(
+                    (vf) => vf.id == p.basename(physicalFile.path),
+                    orElse: () => VaultFile(
+                      id: p.basename(physicalFile.path),
+                      fileName: p.basename(physicalFile.path),
+                      originalPath: physicalFile.path,
+                      dateAdded: DateTime.now(),
+                      originalParentPath: currentFolder.id,
+                    ),
+                  );
+
+                  return GestureDetector(
+                    onTap: () {
+                      final safeFiles = _vaultFiles.isNotEmpty
+                          ? _vaultFiles
+                          : _convertToVaultFiles(folderFiles);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PhotoViewPage(
+                            files: safeFiles,
+                            initialIndex: fileIndex.clamp(
+                              0,
+                              safeFiles.length - 1,
+                            ),
+                            parentFolder: currentFolder,
+                          ),
+                        ),
+                      );
+                    },
+                    onLongPress: () => _showFileOptions(context, vaultFile),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _buildThumbnail(physicalFile),
+                    ),
+                  );
+                },
+              ),
+            ),
+      floatingActionButton: _buildFabMenu(),
+    );
+  }
+
+  // ✅ Helper to convert File list to VaultFile list (fallback)
+  List<VaultFile> _convertToVaultFiles(List<File> files) {
+    return files.map((f) {
+      return VaultFile(
+        id: p.basename(f.path),
+        fileName: p.basename(f.path),
+        originalPath: f.path,
+        dateAdded: DateTime.now(),
+        originalParentPath: currentFolder.id,
+      );
+    }).toList();
+  }
+
+  /// ✅ Restored: File options bottom sheet
+  void _showFileOptions(BuildContext context, VaultFile file) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.recycling, color: Colors.orange),
+              title: const Text('Move to Recycle Bin'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _moveFileToRecycleBin(context, file);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ✅ Restored: Move file to recycle bin
+  void _moveFileToRecycleBin(BuildContext context, VaultFile file) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Move to Recycle Bin'),
+        content: Text(
+          'Are you sure you want to move "${file.fileName}" to the recycle bin?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              await StorageHelper.moveFileToRecycleBin(file, currentFolder);
+              await refreshItemCounts();
+              await _loadAllFolderContents();
+            },
+            child: const Text('Move'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Folder management actions ---
+  void _renameFolder(BuildContext context, VaultFolder folder, String newName) async {
+    final updatedFolder = folder.copyWith(name: newName);
+    await StorageHelper.updateFolderMetadata(updatedFolder);
+
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    final index = currentFolders.indexWhere((f) => f.id == folder.id);
+    if (index != -1) currentFolders[index] = updatedFolder;
+    foldersNotifier.value = currentFolders;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
+    }
+  }
+
+  void _deleteFolder(BuildContext context, VaultFolder folder) async {
+    await StorageHelper.deleteFolder(folder);
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+
+    final List<String> idsToDelete = [folder.id];
+    void findChildren(String parentId) {
+      final children = currentFolders.where((f) => f.parentPath == parentId);
+      for (final child in children) {
+        idsToDelete.add(child.id);
+        findChildren(child.id);
+      }
+    }
+
+    findChildren(folder.id);
+    currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
+    foldersNotifier.value = currentFolders;
+    await refreshItemCounts();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Folder "${folder.name}" deleted')));
+    }
+  }
+
+  void _customizeFolder(
+      BuildContext context, VaultFolder folder, IconData icon, Color color) async {
+    final updatedFolder = folder.copyWith(icon: icon, color: color);
+    await StorageHelper.updateFolderMetadata(updatedFolder);
+
+    final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+    final index = currentFolders.indexWhere((f) => f.id == folder.id);
+    if (index != -1) currentFolders[index] = updatedFolder;
+    foldersNotifier.value = currentFolders;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Folder "${folder.name}" customized')),
+      );
+    }
+  }
+
+  // --- Thumbnail helpers ---
+  Widget _buildThumbnail(File file) {
+    final path = file.path;
+    if (_isImage(path)) {
+      return Image.file(file,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image));
+    } else if (_isVideo(path)) {
+      return Stack(
+        fit: StackFit.expand,
+        children: const [
+          ColoredBox(color: Colors.black12),
+          Center(child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
+        ],
+      );
+    } else {
+      return const Icon(Icons.insert_drive_file);
+    }
+  }
+
+  bool _isImage(String path) =>
+      ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+          .contains(p.extension(path).toLowerCase());
+
+  bool _isVideo(String path) =>
+      ['.mp4', '.mov', '.avi', '.mkv']
+          .contains(p.extension(path).toLowerCase());
+
+  // --- Floating Action Menu ---
+  Widget _buildFabMenu() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (isFabMenuOpen) ...[
+          _buildMiniFab(Icons.folder, 'Add Folder',
+              () => _handleOption('Add Folder')),
+          const SizedBox(height: 10),
+          _buildMiniFab(Icons.image, 'Add Images',
+              () => _handleOption('Add Images')),
+          const SizedBox(height: 10),
+          _buildMiniFab(Icons.videocam, 'Add Videos',
+              () => _handleOption('Add Videos')),
+          const SizedBox(height: 10),
+          _buildMiniFab(Icons.insert_drive_file, 'Add Files',
+              () => _handleOption('Add Files')),
+          const SizedBox(height: 16),
+        ],
+        FloatingActionButton(
+          onPressed: _toggleFabMenu,
+          backgroundColor: currentFolder.color,
+          child: RotationTransition(
+            turns:
+                Tween(begin: 0.0, end: 0.125).animate(_fabAnimationController),
+            child: const Icon(Icons.add, color: Colors.white, size: 28),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleOption(String type) async {
+    if (isFabMenuOpen) _toggleFabMenu();
+    switch (type) {
+      case 'Add Images':
+        await _pickAndCopyFiles(FileType.image);
+        break;
+      case 'Add Videos':
+        await _pickAndCopyFiles(FileType.video);
+        break;
+      case 'Add Files':
+        await _pickAndCopyFiles(FileType.any);
+        break;
+      case 'Add Folder':
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (ctx) => FolderCreatorSheet(
+            parentPath: currentFolder.id,
+          ),
+        );
+        break;
+    }
+  }
+
+  Widget _buildMiniFab(IconData icon, String label, VoidCallback onPressed) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: kElevationToShadow[1],
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: currentFolder.color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 42,
+          height: 42,
+          child: FloatingActionButton(
+            heroTag: null,
+            onPressed: onPressed,
+            backgroundColor: currentFolder.color,
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+=== end of folder_view_page.dart ===]
+
+[==== home_page.dart ===
+// lib/pages/home_page.dart
+import 'package:flutter/material.dart';
+import 'package:vlt/widgets/folder_card.dart';
+import '../data/notifiers.dart';
+import 'package:vlt/pages/folder_view_page.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'package:vlt/widgets/folder_creator_sheet.dart';
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Welcome section
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.security,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Secure Vault',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Your private files are safe and encrypted',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Folders section header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Folders',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(20),
+                      ),
+                    ),
+                    builder: (context) =>
+                        const FolderCreatorSheet(parentPath: 'root'),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Add'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Folders grid
+          Expanded(
+            child: ValueListenableBuilder<List<VaultFolder>>(
+              valueListenable: foldersNotifier,
+              builder: (context, folders, child) {
+                final rootFolders =
+                    folders.where((f) => f.parentPath == 'root').toList();
+
+                if (rootFolders.isEmpty) {
+                  return _buildEmptyState(context);
+                }
+                return GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 1.1,
+                  ),
+                  itemCount: rootFolders.length,
+                  itemBuilder: (context, index) {
+                    final folder = rootFolders[index];
+                    
+                    // The itemCount is now directly from the notifier, which is kept up-to-date.
+                    // No need for on-the-fly calculation here anymore.
+                    return FolderCard(
+                      folder: folder,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => FolderViewPage(folder: folder),
+                          ),
+                        );
+                      },
+                      onRename: (folder, newName) {
+                        _renameFolder(context, folder, newName);
+                      },
+                      onDelete: (f) => _deleteFolder(context, f),
+                      onCustomize: (folder, icon, color) {
+                        _customizeFolder(context, folder, icon, color);
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.folder_open_outlined,
+            size: 64,
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No folders yet',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Tap the + button to create your first folder',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Renames a folder's metadata.
+void _renameFolder(
+  BuildContext context,
+  VaultFolder folder,
+  String newName,
+) async {
+  final updatedFolder = folder.copyWith(name: newName);
+  await StorageHelper.updateFolderMetadata(updatedFolder);
+
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+  if (folderIndex != -1) {
+    currentFolders[folderIndex] = updatedFolder;
+    foldersNotifier.value = currentFolders;
+  }
+
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder renamed to "$newName"')),
+    );
+  }
+}
+
+/// Deletes a folder and all its contents, then refreshes item counts.
+void _deleteFolder(BuildContext context, VaultFolder folder) async {
+  await StorageHelper.deleteFolder(folder);
+
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final List<String> idsToDelete = [folder.id];
+  
+  void findChildren(String parentId) {
+      final children = currentFolders.where((f) => f.parentPath == parentId);
+      for (final child in children) {
+          idsToDelete.add(child.id);
+          findChildren(child.id);
+      }
+  }
+  findChildren(folder.id);
+
+  currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
+  foldersNotifier.value = currentFolders;
+
+  // ✨ FIX: Refresh the item counts for all folders.
+  await refreshItemCounts();
+
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" deleted')),
+    );
+  }
+}
+
+/// Customizes a folder's metadata.
+void _customizeFolder(
+  BuildContext context,
+  VaultFolder folder,
+  IconData newIcon,
+  Color newColor,
+) async {
+  final updatedFolder = folder.copyWith(icon: newIcon, color: newColor);
+  await StorageHelper.updateFolderMetadata(updatedFolder);
+
+  final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  final folderIndex = currentFolders.indexWhere((f) => f.id == folder.id);
+  if (folderIndex != -1) {
+    currentFolders[folderIndex] = updatedFolder;
+    foldersNotifier.value = currentFolders;
+  }
+
+  if (ScaffoldMessenger.of(context).mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Folder "${folder.name}" customized')),
+    );
+  }
+}
+=== end of home_page.dart ===]
+
+[==== photo_view_page.dart ===
+// lib/pages/photo_view_page.dart
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
+import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path/path.dart' as p;
+
+import 'package:vlt/data/notifiers.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'package:vlt/utils/storage_helper.dart';
+
+class PhotoViewPage extends StatefulWidget {
+  final List<VaultFile> files;
+  final int initialIndex;
+  final VaultFolder parentFolder;
+
+  const PhotoViewPage({
+    super.key,
+    required this.files,
+    required this.initialIndex,
+    required this.parentFolder,
+  });
+
+  @override
+  State<PhotoViewPage> createState() => _PhotoViewPageState();
+}
+
+class _PhotoViewPageState extends State<PhotoViewPage> {
+  late PageController _pageController;
+  late int _currentIndex;
+  bool _showUI = true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ✅ Clamp the index safely in case list is empty or shorter than expected
+    _currentIndex = widget.files.isEmpty
+        ? 0
+        : widget.initialIndex.clamp(0, widget.files.length - 1);
+    _pageController = PageController(initialPage: _currentIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // ✅ Prevent crash if no files
+    if (widget.files.isEmpty) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Text(
+            'No files to display',
+            style: TextStyle(color: Colors.white, fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // ✅ Main PageView with safe itemCount
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.files.length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemBuilder: (context, index) {
+              final vaultFile = widget.files[index];
+
+              return FutureBuilder<Directory?>(
+                future: StorageHelper.findFolderDirectoryById(
+                  widget.parentFolder.id,
+                ),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.done &&
+                      snapshot.data != null) {
+                    final filePath = p.join(snapshot.data!.path, vaultFile.id);
+                    final file = File(filePath);
+
+                    return GestureDetector(
+                      onTap: _toggleUIVisibility,
+                      child: InteractiveViewer(
+                        child: file.existsSync()
+                            ? Image.file(
+                                file,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) =>
+                                    const Center(child: Icon(Icons.broken_image, color: Colors.white, size: 60)),
+                              )
+                            : const Center(
+                                child: Icon(Icons.broken_image,
+                                    color: Colors.white, size: 60),
+                              ),
+                      ),
+                    );
+                  }
+                  return const Center(child: CircularProgressIndicator());
+                },
+              );
+            },
+          ),
+
+          // ✅ Top + bottom UI overlays (animated)
+          AnimatedOpacity(
+            opacity: _showUI ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 250),
+            child: IgnorePointer(
+              ignoring: !_showUI,
+              child: Column(
+                children: [
+                  _buildAppBar(),
+                  const Spacer(),
+                  _buildBottomAppBar(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleUIVisibility() {
+    setState(() => _showUI = !_showUI);
+  }
+
+  AppBar _buildAppBar() {
+    final vaultFile = widget.files[_currentIndex];
+
+    return AppBar(
+      backgroundColor: Colors.black.withOpacity(0.5),
+      foregroundColor: Colors.white,
+      title: Text(
+        vaultFile.fileName,
+        overflow: TextOverflow.ellipsis,
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.info_outline),
+          onPressed: _showInfoSheet,
+          tooltip: 'Details',
+        ),
+        IconButton(
+          icon: const Icon(Icons.share_outlined),
+          onPressed: _shareCurrentFile,
+          tooltip: 'Share',
+        ),
+        IconButton(
+          icon: const Icon(Icons.recycling),
+          onPressed: _moveCurrentFileToRecycleBin,
+          tooltip: 'Recycle Bin',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomAppBar() {
+    return BottomAppBar(
+      color: Colors.black.withOpacity(0.5),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: Center(
+          child: Text(
+            '${_currentIndex + 1} / ${widget.files.length}',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 🗑️ Move file to recycle bin
+  Future<void> _moveCurrentFileToRecycleBin() async {
+    final currentFile = widget.files[_currentIndex];
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Move to Recycle Bin'),
+        content: Text(
+          'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Move'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await StorageHelper.moveFileToRecycleBin(
+        currentFile,
+        widget.parentFolder,
+      );
+      await refreshItemCounts();
+      if (mounted) Navigator.pop(context);
+    }
+  }
+
+  // 📤 Share file
+  Future<void> _shareCurrentFile() async {
+    final vaultFile = widget.files[_currentIndex];
+    final folderDir =
+        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    if (folderDir == null) return;
+
+    final filePath = p.join(folderDir.path, vaultFile.id);
+    final file = XFile(filePath);
+    await Share.shareXFiles([file]);
+  }
+
+  // 🧾 Show info sheet
+  void _showInfoSheet() async {
+    final vaultFile = widget.files[_currentIndex];
+    final folderDir =
+        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    if (folderDir == null) return;
+
+    final file = File(p.join(folderDir.path, vaultFile.id));
+    if (!await file.exists()) return;
+
+    final fileStat = await file.stat();
+    final decodedImage = img.decodeImage(await file.readAsBytes());
+
+    final fileSize = NumberFormat.compact().format(fileStat.size);
+    final dimensions = decodedImage != null
+        ? '${decodedImage.width} × ${decodedImage.height}'
+        : 'N/A';
+    final dateAdded = DateFormat.yMMMd().add_jm().format(vaultFile.dateAdded);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: DefaultTextStyle(
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(vaultFile.fileName,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      fontSize: 16)),
+              const Divider(height: 24, color: Colors.white30),
+              Text('Path: /${widget.parentFolder.name}'),
+              Text('Original Path: ${vaultFile.originalPath}',
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 8),
+              Text('Size: $fileSize'),
+              Text('Dimensions: $dimensions'),
+              Text('Date Added: $dateAdded'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=== end of photo_view_page.dart ===]
+
+[==== recycle_bin_page.dart ===
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:vlt/data/notifiers.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'package:path/path.dart' as p;
+
+class RecycleBinPage extends StatefulWidget {
+  const RecycleBinPage({super.key});
+
+  @override
+  State<RecycleBinPage> createState() => _RecycleBinPageState();
+}
+
+class _RecycleBinPageState extends State<RecycleBinPage> {
+  List<VaultFile> _recycledFiles = [];
+  bool _isLoading = true;
+  bool _isSelectionMode = false;
+  final Set<VaultFile> _selectedItems = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecycledFiles();
+  }
+
+  Future<void> _loadRecycledFiles() async {
+    setState(() {
+      _isLoading = true;
+    });
+    final files = await StorageHelper.loadRecycledFiles();
+    if (mounted) {
+      setState(() {
+        _recycledFiles = files;
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _toggleSelectionMode() {
+    setState(() {
+      _isSelectionMode = !_isSelectionMode;
+      _selectedItems.clear();
+    });
+  }
+
+  void _onItemTap(VaultFile file) {
+    if (_isSelectionMode) {
+      setState(() {
+        if (_selectedItems.contains(file)) {
+          _selectedItems.remove(file);
+        } else {
+          _selectedItems.add(file);
+        }
+      });
+    } else {
+      // In the future, you could open a preview here.
+    }
+  }
+
+  void _selectAll() {
+    setState(() {
+      if (_selectedItems.length == _recycledFiles.length) {
+        _selectedItems.clear();
+      } else {
+        _selectedItems.addAll(_recycledFiles);
+      }
+    });
+  }
+
+  Future<void> _restoreSelectedFiles() async {
+    if (_selectedItems.isEmpty) return;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore Items'),
+        content: Text('Are you sure you want to restore ${_selectedItems.length} selected item(s)?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+
+   if (confirmed == true && mounted) {
+      for (final file in _selectedItems) {
+        // ✨ FIX: Pass the full folder list to the helper function.
+        await StorageHelper.restoreFileFromRecycleBin(file, foldersNotifier.value);
+      }
+      
+      await refreshItemCounts();
+      _toggleSelectionMode(); // Exit selection mode
+      await _loadRecycledFiles(); // Refresh the list
+    }
+  }
+
+  Future<void> _deleteSelectedFilesPermanently() async {
+    if (_selectedItems.isEmpty) return;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Permanently'),
+        content: Text('Are you sure you want to permanently delete ${_selectedItems.length} selected item(s)? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      for (final file in _selectedItems) {
+        await StorageHelper.permanentlyDeleteFile(file);
+      }
+      _toggleSelectionMode(); // Exit selection mode
+      await _loadRecycledFiles(); // Refresh the list
+    }
+  }
+  
+  Future<void> _deleteAllPermanently() async {
+     final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Empty Recycle Bin'),
+        content: const Text('Are you sure you want to permanently delete every item in the recycle bin? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete All'),
+          ),
+        ],
+      ),
+    );
+     if (confirmed == true) {
+      await StorageHelper.permanentlyDeleteAllRecycledFiles();
+      await _loadRecycledFiles();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _recycledFiles.isEmpty
+              ? const Center(child: Text('Recycle bin is empty.'))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: _recycledFiles.length,
+                  itemBuilder: (context, index) {
+                    final file = _recycledFiles[index];
+                    final isSelected = _selectedItems.contains(file);
+                    return _buildGridItem(file, isSelected);
+                  },
+                ),
+       bottomNavigationBar: _isSelectionMode && _selectedItems.isNotEmpty ? _buildBottomActionBar() : null,
+    );
+  }
+
+  AppBar _buildNormalAppBar() {
+    return AppBar(
+      title: const Text('Recycle Bin'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.edit_note),
+          tooltip: 'Select Items',
+          onPressed: _recycledFiles.isNotEmpty ? _toggleSelectionMode : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.delete_forever),
+          tooltip: 'Empty Recycle Bin',
+          onPressed: _recycledFiles.isNotEmpty ? _deleteAllPermanently : null,
+        ),
+      ],
+    );
+  }
+
+  AppBar _buildSelectionAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        onPressed: _toggleSelectionMode,
+      ),
+      title: Text('${_selectedItems.length} / ${_recycledFiles.length}'),
+      centerTitle: true,
+      actions: [
+        TextButton(
+          onPressed: _selectAll,
+          child: Text(
+            _selectedItems.length == _recycledFiles.length ? 'DESELECT ALL' : 'SELECT ALL',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGridItem(VaultFile file, bool isSelected) {
+    return GestureDetector(
+      onTap: () => _onItemTap(file),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // This is a placeholder for the thumbnail
+          Container(
+             color: Colors.grey.shade300,
+             child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+          ),
+          if (_isSelectionMode)
+            Container(
+              color: isSelected ? Colors.black.withOpacity(0.5) : Colors.transparent,
+              child: isSelected
+                  ? const Icon(Icons.check_circle, color: Colors.white)
+                  : const Icon(Icons.radio_button_unchecked, color: Colors.white70),
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildBottomActionBar() {
+    return BottomAppBar(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.restore),
+            label: const Text('Restore'),
+            onPressed: _restoreSelectedFiles,
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.delete_forever, color: Colors.red),
+            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+            onPressed: _deleteSelectedFilesPermanently,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+=== end of recycle_bin_page.dart ===]
+
+[==== settings_page.dart ===
+// lib/pages/settings_page.dart
+import 'package:flutter/material.dart';
+import 'recycle_bin_page.dart'; // ✨ NEW: Import the new page we are about to create.
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+
+  // Show a simple snackbar message for other "coming soon" buttons
+  void _showComingSoon(BuildContext context, String title) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$title – Coming soon!'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // Reusable styled setting button
+  Widget _buildSettingButton({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      title: Text(label),
+      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+      onTap: onTap,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // The Scaffold's AppBar was removed because the MainScreen already provides one.
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        // 🗑️ Recycle Bin (always first)
+        _buildSettingButton(
+          context: context,
+          icon: Icons.delete_outline,
+          label: 'Recycle Bin',
+          // ✨ CHANGED: Navigate to the new RecycleBinPage.
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const RecycleBinPage()),
+            );
+          },
+        ),
+
+        const Divider(),
+
+        // 🌓 Change Theme
+        _buildSettingButton(
+          context: context,
+          icon: Icons.brightness_6,
+          label: 'Change Theme',
+          onTap: () => _showComingSoon(context, 'Change Theme'),
+        ),
+
+        // 🎭 Icon Disguise
+        _buildSettingButton(
+          context: context,
+          icon: Icons.shield,
+          label: 'Icon Disguise',
+          onTap: () => _showComingSoon(context, 'Icon Disguise'),
+        ),
+
+        // 🔑 Fake Password
+        _buildSettingButton(
+          context: context,
+          icon: Icons.lock_outline,
+          label: 'Fake Password',
+          onTap: () => _showComingSoon(context, 'Fake Password'),
+        ),
+
+        // 📱 Device Migration
+        _buildSettingButton(
+          context: context,
+          icon: Icons.sync_alt,
+          label: 'Device Migration',
+          onTap: () => _showComingSoon(context, 'Device Migration'),
+        ),
+
+        // 🔁 Backup & Restore
+        _buildSettingButton(
+          context: context,
+          icon: Icons.backup,
+          label: 'Backup & Restore',
+          onTap: () => _showComingSoon(context, 'Backup & Restore'),
+        ),
+      ],
+    );
+  }
+}
+=== end of settings_page.dart ===]
+
+[==== storage_helper.dart ===
+// lib/utils/storage_helper.dart
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
+import '../data/notifiers.dart';
+import '../models/vault_folder.dart';
+
+class StorageHelper {
+  static const String _folderMetadataFile = '.metadata.json';
+  static const String _fileIndexFile = '.index.json';
+  static const String _recycleBinId = '.recycle_bin';
+  static const _uuid = Uuid();
+
+  static Future<Directory> getVaultRootDirectory() async {
+    final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
+    if (!(await dir.exists())) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  static Future<Directory> getRecycleBinDirectory() async {
+    final root = await getVaultRootDirectory();
+    final dir = Directory(p.join(root.path, _recycleBinId));
+    if (!(await dir.exists())) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  static Future<bool> requestStoragePermission() async {
+    return await Permission.manageExternalStorage.request().isGranted;
+  }
+
+  static Future<Directory?> findFolderDirectoryById(String folderId) async {
+    final root = await getVaultRootDirectory();
+    if (folderId == _recycleBinId) return getRecycleBinDirectory();
+    
+    try {
+        final entities = root.listSync(recursive: true);
+        for (var entity in entities) {
+            if (entity is Directory && p.basename(entity.path) == folderId) {
+                return entity;
+            }
+        }
+    } catch (e) {
+        debugPrint('Error finding folder by ID: $e');
+    }
+    return null;
+  }
+
+  static Future<void> _saveFolderMetadata(VaultFolder folder) async {
+    Directory? folderDir;
+    if (folder.parentPath == 'root') {
+      final root = await getVaultRootDirectory();
+      folderDir = Directory(p.join(root.path, folder.id));
+    } else {
+      final parentDir = await findFolderDirectoryById(folder.parentPath);
+      if (parentDir != null) {
+        folderDir = Directory(p.join(parentDir.path, folder.id));
+      }
+    }
+
+    if (folderDir == null) return;
+    if (!await folderDir.exists()) {
+      await folderDir.create(recursive: true);
+    }
+
+    final metadataFile = File(p.join(folderDir.path, _folderMetadataFile));
+    await metadataFile.writeAsString(jsonEncode(folder.toJson()));
+  }
+
+  static Future<List<VaultFile>> loadVaultFileIndex(VaultFolder folder) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null) return [];
+
+    final indexFile = File(p.join(folderDir.path, _fileIndexFile));
+    if (!await indexFile.exists()) return [];
+    
+    try {
+      final content = await indexFile.readAsString();
+      if (content.isEmpty) return [];
+      final List<dynamic> jsonList = jsonDecode(content);
+      return jsonList.map((json) => VaultFile.fromJson(json)).toList();
+    } catch (e) {
+      debugPrint("Error reading file index for ${folder.name}: $e");
+      return [];
+    }
+  }
+
+  static Future<void> saveVaultFileIndex(VaultFolder folder, List<VaultFile> files) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null) return;
+    if (!await folderDir.exists()) {
+        await folderDir.create(recursive: true);
+    }
+
+    final indexFile = File(p.join(folderDir.path, _fileIndexFile));
+    final jsonList = files.map((file) => file.toJson()).toList();
+    await indexFile.writeAsString(jsonEncode(jsonList));
+  }
+  
+  static Future<void> createFolder(VaultFolder newFolder) async {
+    if (!await requestStoragePermission()) return;
+    await _saveFolderMetadata(newFolder);
+  }
+
+  static Future<void> updateFolderMetadata(VaultFolder updatedFolder) async {
+    await _saveFolderMetadata(updatedFolder);
+  }
+
+  static Future<void> deleteFolder(VaultFolder folderToDelete) async {
+    final folderDir = await findFolderDirectoryById(folderToDelete.id);
+    if (folderDir != null && await folderDir.exists()) {
+      await folderDir.delete(recursive: true);
+    }
+  }
+
+  static Future<List<VaultFolder>> loadAllFoldersFromDisk() async {
+    final root = await getVaultRootDirectory();
+    final folders = <VaultFolder>[];
+
+    if (!await root.exists()) return folders;
+
+    try {
+        final entities = root.listSync(recursive: true);
+        for (final entity in entities) {
+            if (entity is File && p.basename(entity.path) == _folderMetadataFile) {
+                try {
+                    final content = await entity.readAsString();
+                    folders.add(VaultFolder.fromJson(jsonDecode(content)));
+                } catch (e) {
+                    debugPrint('Error reading metadata file ${entity.path}: $e');
+                }
+            }
+        }
+    } catch (e) {
+        debugPrint('Error loading folders from disk: $e');
+    }
+    return folders;
+  }
+  
+  static Future<void> saveFileToVault({
+    required VaultFolder folder,
+    required File file,
+  }) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null) return;
+
+    final newFileName = '${_uuid.v4()}${p.extension(file.path)}';
+    final newFilePath = p.join(folderDir.path, newFileName);
+    
+    await file.copy(newFilePath);
+
+    final vaultFile = VaultFile(
+      id: newFileName,
+      fileName: p.basename(file.path),
+      originalPath: file.path,
+      dateAdded: DateTime.now(),
+      originalParentPath: folder.id,
+    );
+
+    final fileIndex = await loadVaultFileIndex(folder);
+    fileIndex.add(vaultFile);
+    await saveVaultFileIndex(folder, fileIndex);
+  }
+
+  static Future<void> moveFileToRecycleBin(VaultFile file, VaultFolder sourceFolder) async {
+    final sourceDir = await findFolderDirectoryById(sourceFolder.id);
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (sourceDir == null) return;
+
+    final sourceFile = File(p.join(sourceDir.path, file.id));
+    if (await sourceFile.exists()) {
+      await sourceFile.rename(p.join(recycleBinDir.path, file.id));
+    }
+
+    final sourceIndex = await loadVaultFileIndex(sourceFolder);
+    sourceIndex.removeWhere((f) => f.id == file.id);
+    await saveVaultFileIndex(sourceFolder, sourceIndex);
+
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final recycleBinIndex = await loadVaultFileIndex(recycleBinFolder);
+    
+    final recycledFile = file.copyWith(
+      isInRecycleBin: true,
+      deletionDate: DateTime.now(),
+      originalParentPath: sourceFolder.id,
+    );
+    recycleBinIndex.add(recycledFile);
+    await saveVaultFileIndex(recycleBinFolder, recycleBinIndex);
+  }
+
+  static Future<void> restoreFileFromRecycleBin(VaultFile fileToRestore, List<VaultFolder> allFolders) async {
+    final destinationFolder = allFolders.firstWhere(
+        (f) => f.id == fileToRestore.originalParentPath,
+        orElse: () => allFolders.firstWhere((f) => f.parentPath == 'root'),
+    );
+
+    final destinationDir = await findFolderDirectoryById(destinationFolder.id);
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (destinationDir == null) return;
+    
+    final sourceFile = File(p.join(recycleBinDir.path, fileToRestore.id));
+    if (await sourceFile.exists()) {
+      await sourceFile.rename(p.join(destinationDir.path, fileToRestore.id));
+    }
+    
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final recycleBinIndex = await loadVaultFileIndex(recycleBinFolder);
+    recycleBinIndex.removeWhere((f) => f.id == fileToRestore.id);
+    await saveVaultFileIndex(recycleBinFolder, recycleBinIndex);
+    
+    final destinationIndex = await loadVaultFileIndex(destinationFolder);
+    final restoredFile = fileToRestore.copyWith(isInRecycleBin: false, setDeletionDateToNull: true);
+    destinationIndex.add(restoredFile);
+    await saveVaultFileIndex(destinationFolder, destinationIndex);
+  }
+
+  static Future<List<VaultFile>> loadRecycledFiles() async {
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    return await loadVaultFileIndex(recycleBinFolder);
+  }
+
+  static Future<void> permanentlyDeleteFile(VaultFile file) async {
+    final recycleBinDir = await getRecycleBinDirectory();
+    final fileToDelete = File(p.join(recycleBinDir.path, file.id));
+    if (await fileToDelete.exists()) {
+      await fileToDelete.delete();
+    }
+
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    final index = await loadVaultFileIndex(recycleBinFolder);
+    index.removeWhere((f) => f.id == file.id);
+    await saveVaultFileIndex(recycleBinFolder, index);
+  }
+
+  static Future<void> permanentlyDeleteAllRecycledFiles() async {
+    final recycleBinDir = await getRecycleBinDirectory();
+    if (await recycleBinDir.exists()) {
+        final entities = recycleBinDir.listSync();
+        for(var entity in entities) {
+            await entity.delete(recursive: true);
+        }
+    }
+    final recycleBinFolder = VaultFolder(id: _recycleBinId, name: 'Recycle Bin', icon: Icons.error, color: Colors.transparent, itemCount: 0, parentPath: 'root', creationDate: DateTime.now());
+    await saveVaultFileIndex(recycleBinFolder, []);
+  }
+
+  static Future<List<File>> getFolderContents(VaultFolder folder) async {
+    final folderDir = await findFolderDirectoryById(folder.id);
+    if (folderDir == null || !await folderDir.exists()) return [];
+
+    try {
+      final entities = folderDir.listSync(recursive: false);
+      return entities.whereType<File>()
+          .where((file) => !p.basename(file.path).startsWith('.'))
+          .toList();
+    } catch (e) {
+      debugPrint('Error reading folder contents: $e');
+      return [];
+    }
+  }
+}
+=== end of storage_helper.dart ===]
+
+[==== folder_card.dart ===
+// lib/widgets/folder_card.dart
+import 'package:flutter/material.dart';
+import 'package:vlt/models/vault_folder.dart';
+
+class FolderCard extends StatelessWidget {
+  final VaultFolder folder;
+  final VoidCallback onTap;
+  final void Function(VaultFolder folder, String newName) onRename;
+  final void Function(VaultFolder folder) onDelete;
+  final void Function(VaultFolder folder, IconData icon, Color color)
+      onCustomize;
+
+  const FolderCard({
+    super.key,
+    required this.folder,
+    required this.onTap,
+    required this.onRename,
+    required this.onDelete,
+    required this.onCustomize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 170, // ✅ Prevent overflow error
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Center( // ✨ FIX: Centered the column
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min, // ✅ Important to limit height
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: folder.color.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(folder.icon, size: 32, color: folder.color),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        folder.name,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${folder.itemCount} items',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withOpacity(0.6),
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 4,
+                right: 4,
+                child: PopupMenuButton<String>(
+                  icon: Icon(
+                    Icons.more_vert,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                    size: 20,
+                  ),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'rename':
+                        _showRenameDialog(context);
+                        break;
+                      case 'customize':
+                        _showCustomizeDialog(context);
+                        break;
+                      case 'delete':
+                        onDelete(folder);
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'rename',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined, size: 20),
+                          SizedBox(width: 12),
+                          Text('Rename'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'customize',
+                      child: Row(
+                        children: [
+                          Icon(Icons.palette_outlined, size: 20),
+                          SizedBox(width: 12),
+                          Text('Customize'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 20,
+                            color: Colors.red,
+                          ),
+                          SizedBox(width: 12),
+                          Text('Delete', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showRenameDialog(BuildContext context) {
+    final controller = TextEditingController(text: folder.name);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          left: 24,
+          right: 24,
+          top: 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Rename Folder',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.drive_file_rename_outline),
+              ),
+              onSubmitted: (value) {
+                if (value.trim().isNotEmpty) {
+                  Navigator.pop(context);
+                  onRename(folder, value.trim());
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () {
+                final newName = controller.text.trim();
+                if (newName.isNotEmpty) {
+                  Navigator.pop(context);
+                  onRename(folder, newName);
+                }
+              },
+              child: const Text('Rename'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCustomizeDialog(BuildContext context) {
+    IconData selectedIcon = folder.icon;
+    Color selectedColor = folder.color;
+
+    final availableIcons = [
+      Icons.folder,
+      Icons.photo_library,
+      Icons.video_library,
+      Icons.note,
+      Icons.music_note,
+      Icons.picture_as_pdf,
+      Icons.description,
+      Icons.archive,
+      Icons.favorite,
+      Icons.star,
+      Icons.lock,
+    ];
+
+    final availableColors = [
+      Colors.blue,
+      Colors.red,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.teal,
+      Colors.pink,
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Wrap(
+                spacing: 10,
+                children: availableIcons.map((icon) {
+                  return IconButton(
+                    icon: Icon(
+                      icon,
+                      color: icon == selectedIcon ? selectedColor : Colors.grey,
+                    ),
+                    onPressed: () => setSheetState(() => selectedIcon = icon),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                children: availableColors.map((color) {
+                  final isSelected = color == selectedColor;
+                  return GestureDetector(
+                    onTap: () => setSheetState(() => selectedColor = color),
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: color,
+                      child: isSelected
+                          ? const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                              size: 16,
+                            )
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  onCustomize(folder, selectedIcon, selectedColor);
+                },
+                child: const Text('Apply'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+=== end of folder_card.dart ===]
+
+[==== folder_creator_sheet.dart ===
+// lib/widgets/folder_creator_sheet.dart
+import 'package:flutter/material.dart';
+import 'package:vlt/models/vault_folder.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/data/notifiers.dart';
+
+/// FolderCreatorSheet - Reusable bottom sheet to create new folders
+/// Can be used for root folders or subfolders by passing parentPath.
+class FolderCreatorSheet extends StatefulWidget {
+  final String parentPath;
+  final void Function(VaultFolder folder)? onFolderCreated;
+
+  const FolderCreatorSheet({
+    super.key,
+    this.parentPath = 'root',
+    this.onFolderCreated,
+  });
+
+  @override
+  State<FolderCreatorSheet> createState() => _FolderCreatorSheetState();
+}
+
+class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
+  final TextEditingController nameController = TextEditingController();
+  IconData selectedIcon = Icons.folder;
+  Color selectedColor = Colors.blue;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          left: 24,
+          right: 24,
+          top: 24,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: selectedColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(selectedIcon, size: 28, color: selectedColor),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Create New Folder',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold)),
+                        Text('Choose name, icon and color',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.7),
+                                )),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Folder name input
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Folder Name',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.drive_file_rename_outline),
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 24),
+
+              // Icon picker
+              _buildLabel('Choose Icon'),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 60,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: availableIcons.map((icon) {
+                    return GestureDetector(
+                      onTap: () => setState(() => selectedIcon = icon),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: icon == selectedIcon
+                              ? selectedColor.withOpacity(0.15)
+                              : Colors.transparent,
+                          border: Border.all(
+                            color:
+                                icon == selectedIcon ? selectedColor : Colors.grey,
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, color: selectedColor),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Color picker
+              _buildLabel('Choose Color'),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: availableColors.map((color) {
+                    final isSelected = color == selectedColor;
+                    return GestureDetector(
+                      onTap: () => setState(() => selectedColor = color),
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  width: 2.5)
+                              : null,
+                        ),
+                        child: isSelected
+                            ? const Icon(Icons.check, color: Colors.white, size: 18)
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _createFolder,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Folder'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLabel(String text) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+    );
+  }
+
+  Future<void> _createFolder() async {
+    final name = nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Folder name cannot be empty')),
+      );
+      return;
+    }
+
+    final newFolder = VaultFolder(
+      id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      icon: selectedIcon,
+      color: selectedColor,
+      itemCount: 0,
+      parentPath: widget.parentPath,
+      creationDate: DateTime.now(),
+    );
+
+    await StorageHelper.createFolder(newFolder);
+
+    // Update the app's state list
+    final updatedList = List<VaultFolder>.from(foldersNotifier.value)..add(newFolder);
+    foldersNotifier.value = updatedList;
+
+    // ✨ FIX: Refresh the item counts for all folders to update the parent's count.
+    await refreshItemCounts();
+
+    if (widget.onFolderCreated != null) {
+      widget.onFolderCreated!(newFolder);
+    }
+
+    if (mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Folder "$name" created')),
+      );
+    }
+  }
+}
+=== end of folder_creator_sheet.dart ===]
+
+[==== main.dart ===
+// main.dart
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:vlt/utils/storage_helper.dart';
+import 'data/notifiers.dart';
+import 'pages/home_page.dart';
+import 'pages/browser_page.dart';
+import 'pages/settings_page.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _requestStoragePermission();
+
+  final loadedFolders = await StorageHelper.loadAllFoldersFromDisk();
+  if (loadedFolders.isEmpty) {
+    final defaultFolders = getDefaultFolders();
+    for (final folder in defaultFolders) {
+      await StorageHelper.createFolder(folder);
+    }
+    foldersNotifier.value = defaultFolders;
+  } else {
+    foldersNotifier.value = loadedFolders;
+  }
+
+  // ✨ NEW: Refresh counts on startup
+  await refreshItemCounts();
+
+  runApp(const VaultApp());
+}
+
+Future<void> _requestStoragePermission() async {
+  var status = await Permission.manageExternalStorage.request();
+  if (status.isDenied) {
+    debugPrint('Storage permission was denied.');
+  } else if (status.isPermanentlyDenied) {
+    debugPrint('Storage permission permanently denied. Opening app settings.');
+    await openAppSettings();
+  }
+}
+
+class VaultApp extends StatelessWidget {
+  const VaultApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: selectedThemeNotifier,
+      builder: (context, isDarkMode, child) {
+        return MaterialApp(
+          title: 'Vault App',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.blue,
+              brightness: isDarkMode ? Brightness.dark : Brightness.light,
+            ),
+          ),
+          home: const MainScreen(),
+        );
+      },
+    );
+  }
+}
+
+class MainScreen extends StatelessWidget {
+  const MainScreen({super.key});
+
+  final List<Widget> pages = const [
+    HomePage(),
+    BrowserPage(),
+    SettingsPage(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: selectedPageNotifier,
+      builder: (context, selectedIndex, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text(
+              'Vault',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+              ),
+            ),
+            centerTitle: true,
+            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            elevation: 2,
+            actions: [
+              ValueListenableBuilder(
+                valueListenable: selectedThemeNotifier,
+                builder: (context, isDarkMode, child) {
+                  return IconButton(
+                    onPressed: () {
+                      selectedThemeNotifier.value = !selectedThemeNotifier.value;
+                    },
+                    icon: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: Icon(
+                        isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                        key: ValueKey(isDarkMode),
+                      ),
+                    ),
+                    tooltip: isDarkMode
+                        ? 'Switch to Light Mode'
+                        : 'Switch to Dark Mode',
+                  );
+                },
+              ),
+              const SizedBox(width: 10),
+            ],
+          ),
+          body: IndexedStack(
+            index: selectedIndex,
+            children: pages,
+          ),
+          bottomNavigationBar: ValueListenableBuilder(
+            valueListenable: selectedPageNotifier,
+            builder: (context, selectedIndex, child) {
+              return NavigationBar(
+                selectedIndex: selectedIndex,
+                onDestinationSelected: (index) {
+                  selectedPageNotifier.value = index;
+                },
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: 'Home',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.explore_outlined),
+                    selectedIcon: Icon(Icons.explore),
+                    label: 'Browser',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.settings_outlined),
+                    selectedIcon: Icon(Icons.settings),
+                    label: 'Settings',
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+=== end of main.dart ===]
+
+[==== pubspec.yaml ===
+name: vlt
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.1
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.3
+  permission_handler: ^12.0.1
+  path_provider: ^2.1.5
+  file_picker: ^10.2.1
+  path: ^1.9.1
+  open_file: ^3.5.10
+  video_player: ^2.10.0
+  uuid: ^4.5.1
+  image: ^4.5.4
+  intl: ^0.20.2
+  share_plus: ^12.0.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^5.0.0
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package
+
+=== end of pubspec.yaml ===]
+
+[==== AndroidManifest.xml ===
+<!-- android\app\src\main\AndroidManifest.xml -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" android:minSdkVersion="30" />
+    
+
+    <application
+        android:label="vlt"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
+
+=== end of AndroidManifest.xml ===]

@@ -1,9 +1,11 @@
+// lib/pages/settings_page.dart
 import 'package:flutter/material.dart';
+import 'recycle_bin_page.dart'; // ✨ NEW: Import the new page we are about to create.
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
-  // Show a simple snackbar message for all "coming soon" buttons
+  // Show a simple snackbar message for other "coming soon" buttons
   void _showComingSoon(BuildContext context, String title) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -30,62 +32,66 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          // 🗑️ Recycle Bin (always first)
-          _buildSettingButton(
-            context: context,
-            icon: Icons.delete_outline,
-            label: 'Recycle Bin',
-            onTap: () => _showComingSoon(context, 'Recycle Bin'),
-          ),
+    // The Scaffold's AppBar was removed because the MainScreen already provides one.
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        // 🗑️ Recycle Bin (always first)
+        _buildSettingButton(
+          context: context,
+          icon: Icons.delete_outline,
+          label: 'Recycle Bin',
+          // ✨ CHANGED: Navigate to the new RecycleBinPage.
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const RecycleBinPage()),
+            );
+          },
+        ),
 
-          const Divider(),
+        const Divider(),
 
-          // 🌓 Change Theme
-          _buildSettingButton(
-            context: context,
-            icon: Icons.brightness_6,
-            label: 'Change Theme',
-            onTap: () => _showComingSoon(context, 'Change Theme'),
-          ),
+        // 🌓 Change Theme
+        _buildSettingButton(
+          context: context,
+          icon: Icons.brightness_6,
+          label: 'Change Theme',
+          onTap: () => _showComingSoon(context, 'Change Theme'),
+        ),
 
-          // 🎭 Icon Disguise
-          _buildSettingButton(
-            context: context,
-            icon: Icons.shield,
-            label: 'Icon Disguise',
-            onTap: () => _showComingSoon(context, 'Icon Disguise'),
-          ),
+        // 🎭 Icon Disguise
+        _buildSettingButton(
+          context: context,
+          icon: Icons.shield,
+          label: 'Icon Disguise',
+          onTap: () => _showComingSoon(context, 'Icon Disguise'),
+        ),
 
-          // 🔑 Fake Password
-          _buildSettingButton(
-            context: context,
-            icon: Icons.lock_outline,
-            label: 'Fake Password',
-            onTap: () => _showComingSoon(context, 'Fake Password'),
-          ),
+        // 🔑 Fake Password
+        _buildSettingButton(
+          context: context,
+          icon: Icons.lock_outline,
+          label: 'Fake Password',
+          onTap: () => _showComingSoon(context, 'Fake Password'),
+        ),
 
-          // 📱 Device Migration
-          _buildSettingButton(
-            context: context,
-            icon: Icons.sync_alt,
-            label: 'Device Migration',
-            onTap: () => _showComingSoon(context, 'Device Migration'),
-          ),
+        // 📱 Device Migration
+        _buildSettingButton(
+          context: context,
+          icon: Icons.sync_alt,
+          label: 'Device Migration',
+          onTap: () => _showComingSoon(context, 'Device Migration'),
+        ),
 
-          // 🔁 Backup & Restore
-          _buildSettingButton(
-            context: context,
-            icon: Icons.backup,
-            label: 'Backup & Restore',
-            onTap: () => _showComingSoon(context, 'Backup & Restore'),
-          ),
-        ],
-      ),
+        // 🔁 Backup & Restore
+        _buildSettingButton(
+          context: context,
+          icon: Icons.backup,
+          label: 'Backup & Restore',
+          onTap: () => _showComingSoon(context, 'Backup & Restore'),
+        ),
+      ],
     );
   }
 }

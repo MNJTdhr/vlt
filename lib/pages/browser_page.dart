@@ -1,3 +1,4 @@
+// lib/pages/browser_pages.dart
 import 'package:flutter/material.dart';
 
 class BrowserPage extends StatelessWidget {
