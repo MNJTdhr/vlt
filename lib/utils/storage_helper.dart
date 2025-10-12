@@ -168,6 +168,44 @@ class StorageHelper {
     await saveVaultFileIndex(folder, fileIndex);
   }
 
+  // ✨ --- NEW FILE TRANSFER LOGIC --- ✨
+  static Future<void> transferFile(
+    VaultFile fileToMove,
+    VaultFolder sourceFolder,
+    VaultFolder destinationFolder,
+  ) async {
+    final sourceDir = await findFolderDirectoryById(sourceFolder.id);
+    final destinationDir = await findFolderDirectoryById(destinationFolder.id);
+
+    if (sourceDir == null || destinationDir == null) {
+      debugPrint('Error: Source or destination folder not found.');
+      return;
+    }
+
+    // 1. Move the physical file
+    final sourceFile = File(p.join(sourceDir.path, fileToMove.id));
+    if (await sourceFile.exists()) {
+      try {
+        await sourceFile.rename(p.join(destinationDir.path, fileToMove.id));
+      } catch (e) {
+        debugPrint('Error moving file: $e');
+        return; // Stop if the file move fails
+      }
+    }
+
+    // 2. Update source folder's metadata
+    final sourceIndex = await loadVaultFileIndex(sourceFolder);
+    sourceIndex.removeWhere((f) => f.id == fileToMove.id);
+    await saveVaultFileIndex(sourceFolder, sourceIndex);
+
+    // 3. Update destination folder's metadata
+    final destinationIndex = await loadVaultFileIndex(destinationFolder);
+    // Update the file's metadata to reflect its new parent
+    final movedFile = fileToMove.copyWith(originalParentPath: destinationFolder.id);
+    destinationIndex.add(movedFile);
+    await saveVaultFileIndex(destinationFolder, destinationIndex);
+  }
+
   static Future<void> moveFileToRecycleBin(VaultFile file, VaultFolder sourceFolder) async {
     final sourceDir = await findFolderDirectoryById(sourceFolder.id);
     final recycleBinDir = await getRecycleBinDirectory();

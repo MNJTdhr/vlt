@@ -386,8 +386,9 @@ class _FolderViewPageState extends State<FolderViewPage>
   void _onFoldersChanged() {
     if (mounted) {
       setState(() {
-        final foundFolders =
-            foldersNotifier.value.where((f) => f.id == widget.folder.id);
+        final foundFolders = foldersNotifier.value.where(
+          (f) => f.id == widget.folder.id,
+        );
         if (foundFolders.isNotEmpty) {
           currentFolder = foundFolders.first;
         }
@@ -404,10 +405,12 @@ class _FolderViewPageState extends State<FolderViewPage>
     if (mounted) {
       setState(() {
         physicalFiles.sort((a, b) {
-          final aIndex =
-              fileMetadata.indexWhere((vf) => vf.id == p.basename(a.path));
-          final bIndex =
-              fileMetadata.indexWhere((vf) => vf.id == p.basename(b.path));
+          final aIndex = fileMetadata.indexWhere(
+            (vf) => vf.id == p.basename(a.path),
+          );
+          final bIndex = fileMetadata.indexWhere(
+            (vf) => vf.id == p.basename(b.path),
+          );
           return aIndex.compareTo(bIndex);
         });
         folderFiles = physicalFiles;
@@ -431,14 +434,17 @@ class _FolderViewPageState extends State<FolderViewPage>
     bool permissionGranted = false;
 
     if (type == FileType.image) {
-      permissionGranted = await Permission.photos.request().isGranted ||
+      permissionGranted =
+          await Permission.photos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else if (type == FileType.video) {
-      permissionGranted = await Permission.videos.request().isGranted ||
+      permissionGranted =
+          await Permission.videos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else {
-      permissionGranted =
-          await Permission.manageExternalStorage.request().isGranted;
+      permissionGranted = await Permission.manageExternalStorage
+          .request()
+          .isGranted;
     }
 
     if (!permissionGranted) {
@@ -474,6 +480,8 @@ class _FolderViewPageState extends State<FolderViewPage>
       );
     }
   }
+
+
 
   List<VaultFolder> _getSubfolders() {
     return foldersNotifier.value
@@ -654,7 +662,11 @@ class _FolderViewPageState extends State<FolderViewPage>
   }
 
   // --- Folder management actions ---
-  void _renameFolder(BuildContext context, VaultFolder folder, String newName) async {
+  void _renameFolder(
+    BuildContext context,
+    VaultFolder folder,
+    String newName,
+  ) async {
     final updatedFolder = folder.copyWith(name: newName);
     await StorageHelper.updateFolderMetadata(updatedFolder);
 
@@ -664,8 +676,9 @@ class _FolderViewPageState extends State<FolderViewPage>
     foldersNotifier.value = currentFolders;
 
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Folder renamed to "$newName"')));
     }
   }
 
@@ -688,13 +701,18 @@ class _FolderViewPageState extends State<FolderViewPage>
     await refreshItemCounts();
 
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Folder "${folder.name}" deleted')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Folder "${folder.name}" deleted')),
+      );
     }
   }
 
   void _customizeFolder(
-      BuildContext context, VaultFolder folder, IconData icon, Color color) async {
+    BuildContext context,
+    VaultFolder folder,
+    IconData icon,
+    Color color,
+  ) async {
     final updatedFolder = folder.copyWith(icon: icon, color: color);
     await StorageHelper.updateFolderMetadata(updatedFolder);
 
@@ -714,9 +732,11 @@ class _FolderViewPageState extends State<FolderViewPage>
   Widget _buildThumbnail(File file) {
     final path = file.path;
     if (_isImage(path)) {
-      return Image.file(file,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image));
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+      );
     } else if (_isVideo(path)) {
       return Stack(
         fit: StackFit.expand,
@@ -730,13 +750,20 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
-  bool _isImage(String path) =>
-      ['.jpg', '.jpeg', '.png', '.gif', '.webp']
-          .contains(p.extension(path).toLowerCase());
+  bool _isImage(String path) => [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.webp',
+  ].contains(p.extension(path).toLowerCase());
 
-  bool _isVideo(String path) =>
-      ['.mp4', '.mov', '.avi', '.mkv']
-          .contains(p.extension(path).toLowerCase());
+  bool _isVideo(String path) => [
+    '.mp4',
+    '.mov',
+    '.avi',
+    '.mkv',
+  ].contains(p.extension(path).toLowerCase());
 
   // --- Floating Action Menu ---
   Widget _buildFabMenu() {
@@ -745,25 +772,39 @@ class _FolderViewPageState extends State<FolderViewPage>
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         if (isFabMenuOpen) ...[
-          _buildMiniFab(Icons.folder, 'Add Folder',
-              () => _handleOption('Add Folder')),
+          _buildMiniFab(
+            Icons.folder,
+            'Add Folder',
+            () => _handleOption('Add Folder'),
+          ),
           const SizedBox(height: 10),
-          _buildMiniFab(Icons.image, 'Add Images',
-              () => _handleOption('Add Images')),
+          _buildMiniFab(
+            Icons.image,
+            'Add Images',
+            () => _handleOption('Add Images'),
+          ),
           const SizedBox(height: 10),
-          _buildMiniFab(Icons.videocam, 'Add Videos',
-              () => _handleOption('Add Videos')),
+          _buildMiniFab(
+            Icons.videocam,
+            'Add Videos',
+            () => _handleOption('Add Videos'),
+          ),
           const SizedBox(height: 10),
-          _buildMiniFab(Icons.insert_drive_file, 'Add Files',
-              () => _handleOption('Add Files')),
+          _buildMiniFab(
+            Icons.insert_drive_file,
+            'Add Files',
+            () => _handleOption('Add Files'),
+          ),
           const SizedBox(height: 16),
         ],
         FloatingActionButton(
           onPressed: _toggleFabMenu,
           backgroundColor: currentFolder.color,
           child: RotationTransition(
-            turns:
-                Tween(begin: 0.0, end: 0.125).animate(_fabAnimationController),
+            turns: Tween(
+              begin: 0.0,
+              end: 0.125,
+            ).animate(_fabAnimationController),
             child: const Icon(Icons.add, color: Colors.white, size: 28),
           ),
         ),
@@ -790,9 +831,7 @@ class _FolderViewPageState extends State<FolderViewPage>
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
-          builder: (ctx) => FolderCreatorSheet(
-            parentPath: currentFolder.id,
-          ),
+          builder: (ctx) => FolderCreatorSheet(parentPath: currentFolder.id),
         );
         break;
     }
@@ -1092,14 +1131,12 @@ void _customizeFolder(
 === end of home_page.dart ===]
 
 [==== photo_view_page.dart ===
-// lib/pages/photo_view_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path/path.dart' as p;
-
 import 'package:vlt/data/notifiers.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
@@ -1120,25 +1157,93 @@ class PhotoViewPage extends StatefulWidget {
   State<PhotoViewPage> createState() => _PhotoViewPageState();
 }
 
-class _PhotoViewPageState extends State<PhotoViewPage> {
+class _PhotoViewPageState extends State<PhotoViewPage>
+    with TickerProviderStateMixin {
   late PageController _pageController;
   late int _currentIndex;
   bool _showUI = true;
+  bool _isZoomed = false;
+
+  final TransformationController _transformationController =
+      TransformationController();
+  late AnimationController _zoomAnimationController;
+  Animation<Matrix4>? _zoomAnimation;
+  Offset? _doubleTapPosition;
 
   @override
   void initState() {
     super.initState();
 
-    // ✅ Clamp the index safely in case list is empty or shorter than expected
     _currentIndex = widget.files.isEmpty
         ? 0
         : widget.initialIndex.clamp(0, widget.files.length - 1);
     _pageController = PageController(initialPage: _currentIndex);
+
+    _zoomAnimationController = AnimationController(
+      vsync: this,
+      // ✨ SMOOTHER ANIMATION: Increased duration for a less snappy feel.
+      duration: const Duration(milliseconds: 300),
+    )..addListener(() {
+        if (_zoomAnimation != null) {
+          _transformationController.value = _zoomAnimation!.value;
+        }
+      });
+
+    _transformationController.addListener(() {
+      final scale = _transformationController.value.getMaxScaleOnAxis();
+      if (_isZoomed && scale < 1.1) {
+        setState(() => _isZoomed = false);
+      } else if (!_isZoomed && scale > 1.1) {
+        setState(() => _isZoomed = true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _zoomAnimationController.dispose();
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleUIVisibility() => setState(() => _showUI = !_showUI);
+
+  void _handleDoubleTapDown(TapDownDetails details) {
+    _doubleTapPosition = details.localPosition;
+  }
+
+  void _handleDoubleTap() {
+    final position = _doubleTapPosition;
+    if (position == null) return;
+
+    final targetScale = _transformationController.value.getMaxScaleOnAxis() > 1.1 ? 1.0 : 2.5;
+
+    final begin = _transformationController.value;
+    final end = Matrix4.identity();
+
+    if (targetScale != 1.0) {
+      end.translate(-position.dx * (targetScale - 1), -position.dy * (targetScale - 1));
+      end.scale(targetScale);
+    }
+    
+    _zoomAnimation = Matrix4Tween(begin: begin, end: end).animate(
+      CurveTween(curve: Curves.easeOut).animate(_zoomAnimationController),
+    );
+    _zoomAnimationController.forward(from: 0);
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0.0;
+    if (velocity < -300) {
+      _showInfoSheet();
+    } else if (velocity > 300) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Prevent crash if no files
     if (widget.files.isEmpty) {
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -1153,119 +1258,172 @@ class _PhotoViewPageState extends State<PhotoViewPage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // ✅ Main PageView with safe itemCount
-          PageView.builder(
-            controller: _pageController,
-            itemCount: widget.files.length,
-            onPageChanged: (index) => setState(() => _currentIndex = index),
-            itemBuilder: (context, index) {
-              final vaultFile = widget.files[index];
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            PageView.builder(
+              physics: _isZoomed
+                  ? const NeverScrollableScrollPhysics()
+                  : const BouncingScrollPhysics(),
+              controller: _pageController,
+              itemCount: widget.files.length,
+              onPageChanged: (index) {
+                setState(() {
+                  _currentIndex = index;
+                  _transformationController.value = Matrix4.identity();
+                });
+              },
+              itemBuilder: (context, index) {
+                final vaultFile = widget.files[index];
 
-              return FutureBuilder<Directory?>(
-                future: StorageHelper.findFolderDirectoryById(
-                  widget.parentFolder.id,
-                ),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.done &&
-                      snapshot.data != null) {
-                    final filePath = p.join(snapshot.data!.path, vaultFile.id);
-                    final file = File(filePath);
+                return FutureBuilder<Directory?>(
+                  future: StorageHelper.findFolderDirectoryById(
+                      widget.parentFolder.id),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.done &&
+                        snapshot.data != null) {
+                      final filePath = p.join(snapshot.data!.path, vaultFile.id);
+                      final file = File(filePath);
 
-                    return GestureDetector(
-                      onTap: _toggleUIVisibility,
-                      child: InteractiveViewer(
-                        child: file.existsSync()
-                            ? Image.file(
-                                file,
-                                fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) =>
-                                    const Center(child: Icon(Icons.broken_image, color: Colors.white, size: 60)),
-                              )
-                            : const Center(
+                      if (!file.existsSync()) {
+                        return const Center(
+                          child: Icon(Icons.broken_image,
+                              color: Colors.white, size: 60),
+                        );
+                      }
+
+                      return GestureDetector(
+                        onTap: _toggleUIVisibility,
+                        onDoubleTapDown: _handleDoubleTapDown,
+                        onDoubleTap: _handleDoubleTap,
+                        onVerticalDragEnd: _isZoomed ? null : _handleVerticalDragEnd,
+                        // ✨ FIX: ClipRect prevents the zoomed image from overflowing.
+                        child: ClipRect(
+                          child: InteractiveViewer(
+                            transformationController: _transformationController,
+                            minScale: 1.0,
+                            maxScale: 4.0,
+                            // ✨ FIX: Removing the Center widget allows the viewer to fill the screen.
+                            child: Image.file(
+                              file,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Center(
                                 child: Icon(Icons.broken_image,
                                     color: Colors.white, size: 60),
                               ),
-                      ),
-                    );
-                  }
-                  return const Center(child: CircularProgressIndicator());
-                },
-              );
-            },
-          ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
 
-          // ✅ Top + bottom UI overlays (animated)
-          AnimatedOpacity(
-            opacity: _showUI ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 250),
-            child: IgnorePointer(
-              ignoring: !_showUI,
-              child: Column(
-                children: [
-                  _buildAppBar(),
-                  const Spacer(),
-                  _buildBottomAppBar(),
-                ],
+                    return const Center(child: CircularProgressIndicator());
+                  },
+                );
+              },
+            ),
+
+            // Overlay UI
+            AnimatedOpacity(
+              opacity: _showUI ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: IgnorePointer(
+                ignoring: !_showUI,
+                child: Column(
+                  children: [
+                    _buildAppBar(),
+                    const Spacer(),
+                    _buildBottomToolbar(),
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  AppBar _buildAppBar() {
+    final vaultFile = widget.files[_currentIndex];
+    return AppBar(
+      backgroundColor: Colors.black.withOpacity(0.5),
+      foregroundColor: Colors.white,
+      elevation: 0,
+      leading: BackButton(color: Colors.white),
+      title: Text(vaultFile.fileName, overflow: TextOverflow.ellipsis),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.play_circle_outline),
+          tooltip: 'Slideshow (placeholder)',
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Slideshow coming soon!')),
+            );
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.info_outline),
+          tooltip: 'Details',
+          onPressed: _showInfoSheet,
+        ),
+        const SizedBox(width: 6),
+      ],
+    );
+  }
+
+  Widget _buildBottomToolbar() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(color: Colors.black.withOpacity(0.5)),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildBottomAction(Icons.lock_open, 'Unhide', _unhidePlaceholder),
+            _buildBottomAction(Icons.drive_file_move_outline, 'Transfer',
+                _transferPlaceholder),
+            _buildBottomAction(
+                Icons.delete, 'Recycle', _moveCurrentFileToRecycleBin),
+            _buildBottomAction(
+                Icons.favorite_border, 'Favourite', _favouritePlaceholder),
+            _buildBottomAction(
+                Icons.share_outlined, 'Share', _shareCurrentFile),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomAction(IconData icon, String label, VoidCallback onPressed) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
         ],
       ),
     );
   }
 
-  void _toggleUIVisibility() {
-    setState(() => _showUI = !_showUI);
-  }
+  void _unhidePlaceholder() =>
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Unhide coming soon!'),
+      ));
+  void _transferPlaceholder() =>
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Transfer coming soon!'),
+      ));
+  void _favouritePlaceholder() =>
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Favourite coming soon!'),
+      ));
 
-  AppBar _buildAppBar() {
-    final vaultFile = widget.files[_currentIndex];
-
-    return AppBar(
-      backgroundColor: Colors.black.withOpacity(0.5),
-      foregroundColor: Colors.white,
-      title: Text(
-        vaultFile.fileName,
-        overflow: TextOverflow.ellipsis,
-      ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.info_outline),
-          onPressed: _showInfoSheet,
-          tooltip: 'Details',
-        ),
-        IconButton(
-          icon: const Icon(Icons.share_outlined),
-          onPressed: _shareCurrentFile,
-          tooltip: 'Share',
-        ),
-        IconButton(
-          icon: const Icon(Icons.recycling),
-          onPressed: _moveCurrentFileToRecycleBin,
-          tooltip: 'Recycle Bin',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomAppBar() {
-    return BottomAppBar(
-      color: Colors.black.withOpacity(0.5),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: Center(
-          child: Text(
-            '${_currentIndex + 1} / ${widget.files.length}',
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // 🗑️ Move file to recycle bin
   Future<void> _moveCurrentFileToRecycleBin() async {
     final currentFile = widget.files[_currentIndex];
     final bool? confirmed = await showDialog<bool>(
@@ -1273,44 +1431,35 @@ class _PhotoViewPageState extends State<PhotoViewPage> {
       builder: (context) => AlertDialog(
         title: const Text('Move to Recycle Bin'),
         content: Text(
-          'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?',
-        ),
+            'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Move'),
-          ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Move')),
         ],
       ),
     );
 
     if (confirmed == true && mounted) {
-      await StorageHelper.moveFileToRecycleBin(
-        currentFile,
-        widget.parentFolder,
-      );
+      await StorageHelper.moveFileToRecycleBin(currentFile, widget.parentFolder);
       await refreshItemCounts();
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
-  // 📤 Share file
   Future<void> _shareCurrentFile() async {
     final vaultFile = widget.files[_currentIndex];
     final folderDir =
         await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
     if (folderDir == null) return;
-
     final filePath = p.join(folderDir.path, vaultFile.id);
     final file = XFile(filePath);
     await Share.shareXFiles([file]);
   }
 
-  // 🧾 Show info sheet
   void _showInfoSheet() async {
     final vaultFile = widget.files[_currentIndex];
     final folderDir =
@@ -1331,45 +1480,88 @@ class _PhotoViewPageState extends State<PhotoViewPage> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.grey[900],
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: DefaultTextStyle(
-          style: const TextStyle(color: Colors.white70, fontSize: 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(vaultFile.fileName,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      fontSize: 16)),
-              const Divider(height: 24, color: Colors.white30),
-              Text('Path: /${widget.parentFolder.name}'),
-              Text('Original Path: ${vaultFile.originalPath}',
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 8),
-              Text('Size: $fileSize'),
-              Text('Dimensions: $dimensions'),
-              Text('Date Added: $dateAdded'),
-            ],
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(vaultFile.fileName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              fontSize: 16),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Action placeholder')),
+                        );
+                      },
+                      icon: const Icon(Icons.copy, color: Colors.white70),
+                    )
+                  ],
+                ),
+                const Divider(height: 20, color: Colors.white24),
+                const SizedBox(height: 6),
+                _infoRow('Path:', '/${widget.parentFolder.name}'),
+                _infoRow('Original Path:', vaultFile.originalPath),
+                _infoRow('File Size:', fileSize),
+                _infoRow('Dimensions:', dimensions),
+                _infoRow('Date Added:', dateAdded),
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
-        ),
+        );
+      },
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+              width: 110,
+              child: Text(label,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.white70))),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(color: Colors.white70),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 3),
+          ),
+        ],
       ),
     );
   }
 }
 
+
 === end of photo_view_page.dart ===]
 
 [==== recycle_bin_page.dart ===
+// lib/pages/recycle_bin_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:vlt/data/notifiers.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
@@ -1387,6 +1579,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   bool _isLoading = true;
   bool _isSelectionMode = false;
   final Set<VaultFile> _selectedItems = {};
+  
+  // ✨ NEW: State for drag-to-select gesture
+  final GlobalKey _gridKey = GlobalKey();
+  int? _lastDraggedIndex;
 
   @override
   void initState() {
@@ -1395,6 +1591,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   }
 
   Future<void> _loadRecycledFiles() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -1407,10 +1604,13 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
     }
   }
 
-  void _toggleSelectionMode() {
+  void _toggleSelectionMode({VaultFile? initialSelection}) {
     setState(() {
       _isSelectionMode = !_isSelectionMode;
       _selectedItems.clear();
+      if (initialSelection != null && _isSelectionMode) {
+        _selectedItems.add(initialSelection);
+      }
     });
   }
 
@@ -1423,8 +1623,39 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
           _selectedItems.add(file);
         }
       });
-    } else {
-      // In the future, you could open a preview here.
+    }
+  }
+  
+  /// ✨ NEW: Handles the drag gesture to select multiple items.
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (!_isSelectionMode) return;
+
+    final RenderBox? gridRenderBox = _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    if (gridRenderBox == null) return;
+    
+    final position = gridRenderBox.globalToLocal(details.globalPosition);
+    
+    // Calculate grid dimensions
+    final crossAxisCount = 3;
+    final gridWidth = gridRenderBox.size.width;
+    final itemWidth = gridWidth / crossAxisCount;
+    final itemHeight = itemWidth; // Assuming square items
+
+    // Calculate which item is being hovered over
+    final dx = position.dx.clamp(0, gridWidth -1);
+    final dy = position.dy.clamp(0, gridRenderBox.size.height - 1);
+    final row = (dy / itemHeight).floor();
+    final col = (dx / itemWidth).floor();
+    final index = (row * crossAxisCount) + col;
+
+    if (index >= 0 && index < _recycledFiles.length && index != _lastDraggedIndex) {
+      final file = _recycledFiles[index];
+      if (!_selectedItems.contains(file)) {
+        setState(() {
+          _selectedItems.add(file);
+        });
+      }
+      _lastDraggedIndex = index;
     }
   }
 
@@ -1461,13 +1692,12 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
 
    if (confirmed == true && mounted) {
       for (final file in _selectedItems) {
-        // ✨ FIX: Pass the full folder list to the helper function.
         await StorageHelper.restoreFileFromRecycleBin(file, foldersNotifier.value);
       }
       
       await refreshItemCounts();
-      _toggleSelectionMode(); // Exit selection mode
-      await _loadRecycledFiles(); // Refresh the list
+      _toggleSelectionMode();
+      await _loadRecycledFiles();
     }
   }
 
@@ -1497,8 +1727,8 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       for (final file in _selectedItems) {
         await StorageHelper.permanentlyDeleteFile(file);
       }
-      _toggleSelectionMode(); // Exit selection mode
-      await _loadRecycledFiles(); // Refresh the list
+      _toggleSelectionMode();
+      await _loadRecycledFiles();
     }
   }
   
@@ -1507,7 +1737,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Empty Recycle Bin'),
-        content: const Text('Are you sure you want to permanently delete every item in the recycle bin? This action cannot be undone.'),
+        content: const Text('Are you sure you want to permanently delete every item? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -1534,20 +1764,40 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _recycledFiles.isEmpty
-              ? const Center(child: Text('Recycle bin is empty.'))
-              : GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.recycling, size: 80, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('Recycle bin is empty.'),
+                    ],
                   ),
-                  itemCount: _recycledFiles.length,
-                  itemBuilder: (context, index) {
-                    final file = _recycledFiles[index];
-                    final isSelected = _selectedItems.contains(file);
-                    return _buildGridItem(file, isSelected);
+                )
+              : GestureDetector( // ✨ NEW: GestureDetector to handle drag selection.
+                  onPanStart: (details) {
+                    if (!_isSelectionMode) {
+                      // Automatically enter selection mode on drag start
+                       _toggleSelectionMode();
+                    }
                   },
+                  onPanUpdate: _onDragUpdate,
+                  onPanEnd: (details) => _lastDraggedIndex = null,
+                  child: GridView.builder(
+                    key: _gridKey,
+                    padding: const EdgeInsets.all(8),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemCount: _recycledFiles.length,
+                    itemBuilder: (context, index) {
+                      final file = _recycledFiles[index];
+                      final isSelected = _selectedItems.contains(file);
+                      return _buildGridItem(file, isSelected);
+                    },
+                  ),
                 ),
        bottomNavigationBar: _isSelectionMode && _selectedItems.isNotEmpty ? _buildBottomActionBar() : null,
     );
@@ -1593,20 +1843,38 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   Widget _buildGridItem(VaultFile file, bool isSelected) {
     return GestureDetector(
       onTap: () => _onItemTap(file),
+      // ✨ NEW: Long press to start selection mode.
+      onLongPress: () {
+        if (!_isSelectionMode) {
+          _toggleSelectionMode(initialSelection: file);
+        }
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // This is a placeholder for the thumbnail
-          Container(
-             color: Colors.grey.shade300,
-             child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+          FutureBuilder<Directory>(
+            future: StorageHelper.getRecycleBinDirectory(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                final filePath = p.join(snapshot.data!.path, file.id);
+                return _buildThumbnail(File(filePath));
+              }
+              return Container(color: Colors.grey.shade300);
+            },
           ),
           if (_isSelectionMode)
             Container(
-              color: isSelected ? Colors.black.withOpacity(0.5) : Colors.transparent,
-              child: isSelected
-                  ? const Icon(Icons.check_circle, color: Colors.white)
-                  : const Icon(Icons.radio_button_unchecked, color: Colors.white70),
+              color: isSelected ? Theme.of(context).primaryColor.withOpacity(0.5) : Colors.black.withOpacity(0.3),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(4.0),
+                  child: Icon(
+                    isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
             ),
         ],
       ),
@@ -1624,14 +1892,55 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
             onPressed: _restoreSelectedFiles,
           ),
           TextButton.icon(
-            icon: const Icon(Icons.delete_forever, color: Colors.red),
-            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+            icon: const Icon(Icons.delete_forever),
+            label: const Text('Delete'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             onPressed: _deleteSelectedFilesPermanently,
           ),
         ],
       ),
     );
   }
+
+  Widget _buildThumbnail(File file) {
+    final path = file.path;
+    if (_isImage(path)) {
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          color: Colors.grey.shade300,
+          child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+        ),
+      );
+    } else if (_isVideo(path)) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(color: Colors.black12),
+          const Center(child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
+        ],
+      );
+    } else {
+      return Container(
+        alignment: Alignment.center,
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        child: Icon(
+          Icons.insert_drive_file,
+          size: 40,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+  }
+
+  bool _isImage(String path) =>
+      ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+          .contains(p.extension(path).toLowerCase());
+
+  bool _isVideo(String path) =>
+      ['.mp4', '.mov', '.avi', '.mkv']
+          .contains(p.extension(path).toLowerCase());
 }
 
 === end of recycle_bin_page.dart ===]

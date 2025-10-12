@@ -1,10 +1,11 @@
+// lib/pages/recycle_bin_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:vlt/data/notifiers.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 import 'package:path/path.dart' as p;
+import 'package:vlt/pages/recycle_bin_photo_view_page.dart'; // ✅ Added import
 
 class RecycleBinPage extends StatefulWidget {
   const RecycleBinPage({super.key});
@@ -19,6 +20,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   bool _isSelectionMode = false;
   final Set<VaultFile> _selectedItems = {};
 
+  // ✨ NEW: State for drag-to-select gesture
+  final GlobalKey _gridKey = GlobalKey();
+  int? _lastDraggedIndex;
+
   @override
   void initState() {
     super.initState();
@@ -26,6 +31,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   }
 
   Future<void> _loadRecycledFiles() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -38,13 +44,17 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
     }
   }
 
-  void _toggleSelectionMode() {
+  void _toggleSelectionMode({VaultFile? initialSelection}) {
     setState(() {
       _isSelectionMode = !_isSelectionMode;
       _selectedItems.clear();
+      if (initialSelection != null && _isSelectionMode) {
+        _selectedItems.add(initialSelection);
+      }
     });
   }
 
+  /// ✅ Modified to open RecycleBinPhotoViewPage
   void _onItemTap(VaultFile file) {
     if (_isSelectionMode) {
       setState(() {
@@ -55,7 +65,54 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
         }
       });
     } else {
-      // In the future, you could open a preview here.
+      final index = _recycledFiles.indexOf(file);
+      Navigator.of(context)
+          .push(MaterialPageRoute(
+        builder: (context) => RecycleBinPhotoViewPage(
+          files: _recycledFiles,
+          initialIndex: index,
+        ),
+      ))
+          .then((_) async {
+        // Refresh list in case a file was restored or deleted
+        await _loadRecycledFiles();
+      });
+    }
+  }
+
+  /// ✨ NEW: Handles the drag gesture to select multiple items.
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (!_isSelectionMode) return;
+
+    final RenderBox? gridRenderBox =
+        _gridKey.currentContext?.findRenderObject() as RenderBox?;
+    if (gridRenderBox == null) return;
+
+    final position = gridRenderBox.globalToLocal(details.globalPosition);
+
+    // Calculate grid dimensions
+    final crossAxisCount = 3;
+    final gridWidth = gridRenderBox.size.width;
+    final itemWidth = gridWidth / crossAxisCount;
+    final itemHeight = itemWidth; // Assuming square items
+
+    // Calculate which item is being hovered over
+    final dx = position.dx.clamp(0, gridWidth - 1);
+    final dy = position.dy.clamp(0, gridRenderBox.size.height - 1);
+    final row = (dy / itemHeight).floor();
+    final col = (dx / itemWidth).floor();
+    final index = (row * crossAxisCount) + col;
+
+    if (index >= 0 &&
+        index < _recycledFiles.length &&
+        index != _lastDraggedIndex) {
+      final file = _recycledFiles[index];
+      if (!_selectedItems.contains(file)) {
+        setState(() {
+          _selectedItems.add(file);
+        });
+      }
+      _lastDraggedIndex = index;
     }
   }
 
@@ -76,7 +133,8 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Restore Items'),
-        content: Text('Are you sure you want to restore ${_selectedItems.length} selected item(s)?'),
+        content: Text(
+            'Are you sure you want to restore ${_selectedItems.length} selected item(s)?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -90,15 +148,15 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       ),
     );
 
-   if (confirmed == true && mounted) {
+    if (confirmed == true && mounted) {
       for (final file in _selectedItems) {
-        // ✨ FIX: Pass the full folder list to the helper function.
-        await StorageHelper.restoreFileFromRecycleBin(file, foldersNotifier.value);
+        await StorageHelper.restoreFileFromRecycleBin(
+            file, foldersNotifier.value);
       }
-      
+
       await refreshItemCounts();
-      _toggleSelectionMode(); // Exit selection mode
-      await _loadRecycledFiles(); // Refresh the list
+      _toggleSelectionMode();
+      await _loadRecycledFiles();
     }
   }
 
@@ -109,7 +167,8 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Permanently'),
-        content: Text('Are you sure you want to permanently delete ${_selectedItems.length} selected item(s)? This action cannot be undone.'),
+        content: Text(
+            'Are you sure you want to permanently delete ${_selectedItems.length} selected item(s)? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -128,17 +187,18 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       for (final file in _selectedItems) {
         await StorageHelper.permanentlyDeleteFile(file);
       }
-      _toggleSelectionMode(); // Exit selection mode
-      await _loadRecycledFiles(); // Refresh the list
+      _toggleSelectionMode();
+      await _loadRecycledFiles();
     }
   }
-  
+
   Future<void> _deleteAllPermanently() async {
-     final bool? confirmed = await showDialog<bool>(
+    final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Empty Recycle Bin'),
-        content: const Text('Are you sure you want to permanently delete every item in the recycle bin? This action cannot be undone.'),
+        content: const Text(
+            'Are you sure you want to permanently delete every item? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -152,7 +212,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
         ],
       ),
     );
-     if (confirmed == true) {
+    if (confirmed == true) {
       await StorageHelper.permanentlyDeleteAllRecycledFiles();
       await _loadRecycledFiles();
     }
@@ -165,22 +225,43 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _recycledFiles.isEmpty
-              ? const Center(child: Text('Recycle bin is empty.'))
-              : GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.recycling, size: 80, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('Recycle bin is empty.'),
+                    ],
                   ),
-                  itemCount: _recycledFiles.length,
-                  itemBuilder: (context, index) {
-                    final file = _recycledFiles[index];
-                    final isSelected = _selectedItems.contains(file);
-                    return _buildGridItem(file, isSelected);
+                )
+              : GestureDetector(
+                  onPanStart: (details) {
+                    if (!_isSelectionMode) {
+                      _toggleSelectionMode();
+                    }
                   },
+                  onPanUpdate: _onDragUpdate,
+                  onPanEnd: (details) => _lastDraggedIndex = null,
+                  child: GridView.builder(
+                    key: _gridKey,
+                    padding: const EdgeInsets.all(8),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemCount: _recycledFiles.length,
+                    itemBuilder: (context, index) {
+                      final file = _recycledFiles[index];
+                      final isSelected = _selectedItems.contains(file);
+                      return _buildGridItem(file, isSelected);
+                    },
+                  ),
                 ),
-       bottomNavigationBar: _isSelectionMode && _selectedItems.isNotEmpty ? _buildBottomActionBar() : null,
+      bottomNavigationBar:
+          _isSelectionMode && _selectedItems.isNotEmpty ? _buildBottomActionBar() : null,
     );
   }
 
@@ -214,7 +295,9 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
         TextButton(
           onPressed: _selectAll,
           child: Text(
-            _selectedItems.length == _recycledFiles.length ? 'DESELECT ALL' : 'SELECT ALL',
+            _selectedItems.length == _recycledFiles.length
+                ? 'DESELECT ALL'
+                : 'SELECT ALL',
           ),
         ),
       ],
@@ -224,26 +307,48 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   Widget _buildGridItem(VaultFile file, bool isSelected) {
     return GestureDetector(
       onTap: () => _onItemTap(file),
+      onLongPress: () {
+        if (!_isSelectionMode) {
+          _toggleSelectionMode(initialSelection: file);
+        }
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // This is a placeholder for the thumbnail
-          Container(
-             color: Colors.grey.shade300,
-             child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+          FutureBuilder<Directory>(
+            future: StorageHelper.getRecycleBinDirectory(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done &&
+                  snapshot.hasData) {
+                final filePath = p.join(snapshot.data!.path, file.id);
+                return _buildThumbnail(File(filePath));
+              }
+              return Container(color: Colors.grey.shade300);
+            },
           ),
           if (_isSelectionMode)
             Container(
-              color: isSelected ? Colors.black.withOpacity(0.5) : Colors.transparent,
-              child: isSelected
-                  ? const Icon(Icons.check_circle, color: Colors.white)
-                  : const Icon(Icons.radio_button_unchecked, color: Colors.white70),
+              color: isSelected
+                  ? Theme.of(context).primaryColor.withOpacity(0.5)
+                  : Colors.black.withOpacity(0.3),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(4.0),
+                  child: Icon(
+                    isSelected
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
             ),
         ],
       ),
     );
   }
-  
+
   Widget _buildBottomActionBar() {
     return BottomAppBar(
       child: Row(
@@ -255,12 +360,55 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
             onPressed: _restoreSelectedFiles,
           ),
           TextButton.icon(
-            icon: const Icon(Icons.delete_forever, color: Colors.red),
-            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+            icon: const Icon(Icons.delete_forever),
+            label: const Text('Delete'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             onPressed: _deleteSelectedFilesPermanently,
           ),
         ],
       ),
     );
   }
+
+  Widget _buildThumbnail(File file) {
+    final path = file.path;
+    if (_isImage(path)) {
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          color: Colors.grey.shade300,
+          child: const Icon(Icons.image_not_supported,
+              color: Colors.grey, size: 40),
+        ),
+      );
+    } else if (_isVideo(path)) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(color: Colors.black12),
+          const Center(
+              child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
+        ],
+      );
+    } else {
+      return Container(
+        alignment: Alignment.center,
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        child: Icon(
+          Icons.insert_drive_file,
+          size: 40,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+  }
+
+  bool _isImage(String path) =>
+      ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+          .contains(p.extension(path).toLowerCase());
+
+  bool _isVideo(String path) =>
+      ['.mp4', '.mov', '.avi', '.mkv']
+          .contains(p.extension(path).toLowerCase());
 }
