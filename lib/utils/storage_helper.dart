@@ -112,6 +112,27 @@ class StorageHelper {
     await _saveFolderMetadata(updatedFolder);
   }
 
+  // ✨ --- NEW FUNCTION TO UPDATE A SINGLE FILE'S METADATA --- ✨
+  static Future<void> updateFileMetadata(
+    VaultFile updatedFile,
+    VaultFolder parentFolder,
+  ) async {
+    // Load the current list of files for the folder.
+    final fileIndex = await loadVaultFileIndex(parentFolder);
+    
+    // Find the index of the file we need to update.
+    final int fileToUpdateIndex = fileIndex.indexWhere((f) => f.id == updatedFile.id);
+
+    // If found, replace it with the updated version.
+    if (fileToUpdateIndex != -1) {
+      fileIndex[fileToUpdateIndex] = updatedFile;
+      // Save the entire updated list back to the file.
+      await saveVaultFileIndex(parentFolder, fileIndex);
+    } else {
+      debugPrint('Error: Could not find file with ID ${updatedFile.id} to update.');
+    }
+  }
+
   static Future<void> deleteFolder(VaultFolder folderToDelete) async {
     final folderDir = await findFolderDirectoryById(folderToDelete.id);
     if (folderDir != null && await folderDir.exists()) {
@@ -168,7 +189,6 @@ class StorageHelper {
     await saveVaultFileIndex(folder, fileIndex);
   }
 
-  // ✨ --- NEW FILE TRANSFER LOGIC --- ✨
   static Future<void> transferFile(
     VaultFile fileToMove,
     VaultFolder sourceFolder,

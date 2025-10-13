@@ -110,8 +110,12 @@ class VaultFile {
 
   /// The date the file was moved to the recycle bin (for auto-purge features).
   final DateTime? deletionDate;
+
   // ✨ FIX: Stores the ID of the folder where the file originally lived.
   final String originalParentPath;
+  
+  // ✨ NEW: A flag to indicate if the file is a favorite.
+  final bool isFavorite;
 
   const VaultFile({
     required this.id,
@@ -120,7 +124,8 @@ class VaultFile {
     required this.dateAdded,
     this.isInRecycleBin = false,
     this.deletionDate,
-    required this.originalParentPath, // ✨ ADDED
+    required this.originalParentPath,
+    this.isFavorite = false, // ✨ ADDED with default value
   });
 
   /// Creates a new instance with updated properties.
@@ -132,7 +137,8 @@ class VaultFile {
     bool? isInRecycleBin,
     bool setDeletionDateToNull = false,
     DateTime? deletionDate,
-    String? originalParentPath, // ✨ ADDED
+    String? originalParentPath,
+    bool? isFavorite, // ✨ ADDED
   }) {
     return VaultFile(
       id: id ?? this.id,
@@ -144,7 +150,8 @@ class VaultFile {
           ? null
           : (deletionDate ?? this.deletionDate),
       originalParentPath:
-          originalParentPath ?? this.originalParentPath, // ✨ ADDED
+          originalParentPath ?? this.originalParentPath,
+      isFavorite: isFavorite ?? this.isFavorite, // ✨ ADDED
     );
   }
 
@@ -156,7 +163,8 @@ class VaultFile {
     'dateAdded': dateAdded.toIso8601String(),
     'isInRecycleBin': isInRecycleBin,
     'deletionDate': deletionDate?.toIso8601String(),
-    'originalParentPath': originalParentPath, // ✨ ADDED
+    'originalParentPath': originalParentPath,
+    'isFavorite': isFavorite, // ✨ ADDED
   };
 
   /// Creates a VaultFile object from a JSON map.
@@ -170,8 +178,8 @@ class VaultFile {
       deletionDate: json['deletionDate'] != null
           ? DateTime.parse(json['deletionDate'])
           : null,
-      // ✨ ADDED: Load the original path, with a fallback for safety.
       originalParentPath: json['originalParentPath'] ?? 'root',
+      isFavorite: json['isFavorite'] ?? false, // ✨ ADDED with fallback
     );
   }
 }

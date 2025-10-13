@@ -34,7 +34,7 @@ class _FolderViewPageState extends State<FolderViewPage>
   bool _isSelectionMode = false;
   final Set<String> _selectedItemIds = {};
 
-  // ✨ REFINED: State for hold-drag-select gesture
+  // State for hold-drag-select gesture
   final GlobalKey _gridKey = GlobalKey();
   int? _lastDraggedIndex;
   Timer? _longPressTimer;
@@ -75,11 +75,48 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
-  /// Load both real files and metadata for this folder.
+  /// ✨ REFINED: Load contents and perform self-healing synchronization.
   Future<void> _loadAllFolderContents() async {
     final physicalFiles = await StorageHelper.getFolderContents(currentFolder);
-    final fileMetadata = await StorageHelper.loadVaultFileIndex(currentFolder);
+    List<VaultFile> fileMetadata = await StorageHelper.loadVaultFileIndex(currentFolder);
 
+    // --- Self-Healing Logic ---
+    bool needsUpdate = false;
+    
+    // Create sets for efficient lookup
+    final physicalFileNames = physicalFiles.map((f) => p.basename(f.path)).toSet();
+    final metadataFileIds = fileMetadata.map((mf) => mf.id).toSet();
+
+    // 1. Find orphan files (exist on disk but not in metadata)
+    final orphanFiles = physicalFileNames.difference(metadataFileIds);
+    if (orphanFiles.isNotEmpty) {
+      needsUpdate = true;
+      for (final fileName in orphanFiles) {
+        final physicalFile = physicalFiles.firstWhere((f) => p.basename(f.path) == fileName);
+        fileMetadata.add(VaultFile(
+          id: fileName,
+          fileName: fileName, // Use the actual file name as a fallback
+          originalPath: 'unknown', // Original path is lost
+          dateAdded: DateTime.now(),
+          originalParentPath: currentFolder.id,
+        ));
+      }
+    }
+
+    // 2. Find ghost metadata (exists in metadata but not on disk)
+    final ghostMetadataIds = metadataFileIds.difference(physicalFileNames);
+    if (ghostMetadataIds.isNotEmpty) {
+      needsUpdate = true;
+      fileMetadata.removeWhere((mf) => ghostMetadataIds.contains(mf.id));
+    }
+
+    // 3. If inconsistencies were found, save the corrected metadata
+    if (needsUpdate) {
+      await StorageHelper.saveVaultFileIndex(currentFolder, fileMetadata);
+      // Also refresh the overall item counts for UI consistency
+      await refreshItemCounts();
+    }
+    
     if (mounted) {
       setState(() {
         folderFiles = physicalFiles;
@@ -87,6 +124,7 @@ class _FolderViewPageState extends State<FolderViewPage>
       });
     }
   }
+
 
   void _toggleFabMenu() {
     setState(() {
@@ -103,14 +141,17 @@ class _FolderViewPageState extends State<FolderViewPage>
     bool permissionGranted = false;
 
     if (type == FileType.image) {
-      permissionGranted = await Permission.photos.request().isGranted ||
+      permissionGranted =
+          await Permission.photos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else if (type == FileType.video) {
-      permissionGranted = await Permission.videos.request().isGranted ||
+      permissionGranted =
+          await Permission.videos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else {
-      permissionGranted =
-          await Permission.manageExternalStorage.request().isGranted;
+      permissionGranted = await Permission.manageExternalStorage
+          .request()
+          .isGranted;
     }
 
     if (!permissionGranted) {
@@ -182,7 +223,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     setState(() {
       final allItemIds = [
         ..._getSubfolders().map((f) => f.id),
-        ..._vaultFiles.map((f) => f.id)
+        ..._vaultFiles.map((f) => f.id),
       ];
       if (_selectedItemIds.length == allItemIds.length) {
         _selectedItemIds.clear();
@@ -193,72 +234,13 @@ class _FolderViewPageState extends State<FolderViewPage>
     });
   }
 
-  /// ✨ REFINED: Central logic for handling drag selection.
-  void _handleDragSelection(Offset globalPosition) {
-    final RenderBox? gridRenderBox =
-        _gridKey.currentContext?.findRenderObject() as RenderBox?;
-    if (gridRenderBox == null) return;
-
-    final position = gridRenderBox.globalToLocal(globalPosition);
-
-    // This calculation now needs to handle two separate grids.
-    // For simplicity with the new layout, this function will now only work for files.
-    // We'll find the position relative to the file grid.
-
-    final subfolders = _getSubfolders();
-    final hasFolders = subfolders.isNotEmpty;
-
-    // A simple heuristic to check if the drag is over the file area.
-    // This assumes folders are always on top. A more robust solution might need multiple keys.
-    double fileGridYOffset = 0;
-    if (hasFolders) {
-      // Approximate height of the folder section
-      final folderRows = (subfolders.length / 2).ceil();
-      final folderGridHeight = folderRows * (MediaQuery.of(context).size.width / 2 * 1.1) + (folderRows - 1) * 16 + 32;
-      fileGridYOffset = folderGridHeight;
-    }
-
-    if(position.dy < fileGridYOffset) return; // Drag is over folder area, ignore for now
-
-    const crossAxisCount = 3;
-    final gridWidth = gridRenderBox.size.width - 16; // Account for padding
-    final itemWidth = gridWidth / crossAxisCount;
-    final itemHeight = itemWidth;
-
-    final dx = position.dx.clamp(8, gridWidth + 8);
-    final dy = position.dy.clamp(fileGridYOffset, gridRenderBox.size.height - 1);
-
-    final relativeDy = dy - fileGridYOffset;
-
-    final row = (relativeDy / (itemHeight + 8)).floor();
-    final col = ((dx - 8) / (itemWidth + 8)).floor();
-    
-    int index = (row * crossAxisCount) + col;
-    index += subfolders.length; // Offset by folder count to get overall index
-
-    final totalItems = subfolders.length + _vaultFiles.length;
-
-    if (index >= subfolders.length &&
-        index < totalItems &&
-        index != _lastDraggedIndex) {
-      final fileIndex = index - subfolders.length;
-      if (fileIndex < _vaultFiles.length) {
-        final itemId = _vaultFiles[fileIndex].id;
-        if (!_selectedItemIds.contains(itemId)) {
-          setState(() {
-            _selectedItemIds.add(itemId);
-          });
-        }
-        _lastDraggedIndex = index;
-      }
-    }
-  }
-
-
   @override
   Widget build(BuildContext context) {
     final subfolders = _getSubfolders();
-    final isEmpty = _vaultFiles.isEmpty && subfolders.isEmpty;
+    final favoriteFiles = _vaultFiles.where((f) => f.isFavorite).toList();
+    final otherFiles = _vaultFiles.where((f) => !f.isFavorite).toList();
+    final isEmpty =
+        otherFiles.isEmpty && favoriteFiles.isEmpty && subfolders.isEmpty;
 
     return Scaffold(
       appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
@@ -287,211 +269,156 @@ class _FolderViewPageState extends State<FolderViewPage>
                   await _loadAllFolderContents();
                 }
               },
-              child: Listener(
-                // ✨ NEW: Using Listener for low-level gesture control
-                onPointerDown: (details) {
-                  _longPressTimer?.cancel();
-                  _longPressTimer =
-                      Timer(const Duration(milliseconds: 300), () {
-                    if (mounted) {
-                      setState(() {
-                        _isDragSelecting = true;
-                        if (!_isSelectionMode) {
-                          _isSelectionMode = true;
-                        }
-                      });
-                      _handleDragSelection(details.position);
-                    }
-                  });
-                },
-                onPointerMove: (details) {
-                  if (_isDragSelecting) {
-                    _handleDragSelection(details.position);
-                  } else {
-                    _longPressTimer?.cancel();
-                  }
-                },
-                onPointerUp: (details) {
-                  _longPressTimer?.cancel();
-                  if (_isDragSelecting) {
-                    setState(() {
-                      _isDragSelecting = false;
-                      _lastDraggedIndex = null;
-                    });
-                  }
-                },
-                onPointerCancel: (details) {
-                   _longPressTimer?.cancel();
-                   if (_isDragSelecting) {
-                    setState(() {
-                      _isDragSelecting = false;
-                      _lastDraggedIndex = null;
-                    });
-                  }
-                },
-                child: CustomScrollView(
-                  key: _gridKey,
-                  physics: _isDragSelecting
-                      ? const NeverScrollableScrollPhysics()
-                      : const BouncingScrollPhysics(
-                          parent: AlwaysScrollableScrollPhysics()),
-                  slivers: [
-                    // --- SECTION 1: SUBFOLDERS (2 columns) ---
-                    if (subfolders.isNotEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.all(16.0),
-                        sliver: SliverGrid(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 16,
-                            mainAxisSpacing: 16,
-                            childAspectRatio: 1.1,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final subfolder = subfolders[index];
-                              final isSelected =
-                                  _selectedItemIds.contains(subfolder.id);
-                              return GestureDetector(
-                                onLongPress: () {
-                                  if (!_isSelectionMode) {
-                                    _toggleSelectionMode(
-                                        initialSelectionId: subfolder.id);
-                                  }
-                                },
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    FolderCard(
-                                      folder: subfolder,
-                                      onTap: () {
-                                        if (_isSelectionMode) {
-                                          _toggleItemSelection(subfolder.id);
-                                        } else {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) => FolderViewPage(
-                                                  folder: subfolder),
-                                            ),
-                                          );
-                                        }
-                                      },
-                                      onRename: (f, newName) =>
-                                          _renameFolder(context, f, newName),
-                                      onDelete: (f) =>
-                                          _deleteFolder(context, f),
-                                      onCustomize: (f, icon, color) =>
-                                          _customizeFolder(
-                                              context, f, icon, color),
-                                    ),
-                                    if (_isSelectionMode)
-                                      _buildSelectionOverlay(isSelected,
-                                          isFolder: true),
-                                  ],
-                                ),
-                              );
-                            },
-                            childCount: subfolders.length,
-                          ),
-                        ),
-                      ),
-
-                    // --- SECTION 2: SEPARATOR LINE ---
-                    if (subfolders.isNotEmpty && _vaultFiles.isNotEmpty)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24.0, vertical: 8.0),
-                          child: Divider(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withOpacity(0.5)),
-                        ),
-                      ),
-
-                    // --- SECTION 3: FILES (3 columns) ---
-                    if (_vaultFiles.isNotEmpty)
-                      SliverPadding(
-                        padding: EdgeInsets.fromLTRB(
-                          8.0,
-                          subfolders.isNotEmpty ? 0.0 : 16.0,
-                          8.0,
-                          8.0,
-                        ),
-                        sliver: SliverGrid(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final vaultFile = _vaultFiles[index];
-                              final isSelected =
-                                  _selectedItemIds.contains(vaultFile.id);
-                              final physicalFile = folderFiles.firstWhere(
-                                (f) => p.basename(f.path) == vaultFile.id,
-                                orElse: () => File(''),
-                              );
-
-                              if (physicalFile.path.isEmpty) {
-                                return const Center(
-                                    child: Icon(Icons.broken_image,
-                                        color: Colors.grey));
-                              }
-
-                              return GestureDetector(
-                                onTap: () {
-                                  if (_isSelectionMode) {
-                                    _toggleItemSelection(vaultFile.id);
-                                  } else {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PhotoViewPage(
-                                          files: _vaultFiles,
-                                          initialIndex: index,
-                                          parentFolder: currentFolder,
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                },
-                                onLongPress: () {
-                                  if (!_isSelectionMode) {
-                                    _toggleSelectionMode(
-                                        initialSelectionId: vaultFile.id);
-                                  }
-                                },
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: _buildThumbnail(physicalFile),
-                                    ),
-                                    if (_isSelectionMode)
-                                      _buildSelectionOverlay(isSelected),
-                                  ],
-                                ),
-                              );
-                            },
-                            childCount: _vaultFiles.length,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+              child: CustomScrollView(
+                physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics()),
+                slivers: [
+                  if (subfolders.isNotEmpty) _buildFolderGrid(subfolders),
+                  if (subfolders.isNotEmpty && (favoriteFiles.isNotEmpty || otherFiles.isNotEmpty))
+                    _buildDivider(),
+                  if (favoriteFiles.isNotEmpty)
+                    _buildFileGrid(favoriteFiles, _vaultFiles, subfolders.isEmpty),
+                  if (favoriteFiles.isNotEmpty && otherFiles.isNotEmpty)
+                    _buildDivider(),
+                  if (otherFiles.isNotEmpty)
+                    _buildFileGrid(
+                        otherFiles, _vaultFiles, subfolders.isEmpty && favoriteFiles.isEmpty),
+                ],
               ),
             ),
       floatingActionButton: _isSelectionMode ? null : _buildFabMenu(),
       bottomNavigationBar: _isSelectionMode && _selectedItemIds.isNotEmpty
           ? _buildBottomActionBar()
           : null,
+    );
+  }
+
+  Widget _buildFolderGrid(List<VaultFolder> subfolders) {
+    return SliverPadding(
+      padding: const EdgeInsets.all(16.0),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+          childAspectRatio: 1.1,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final subfolder = subfolders[index];
+            final isSelected = _selectedItemIds.contains(subfolder.id);
+            return GestureDetector(
+              onLongPress: () {
+                if (!_isSelectionMode) {
+                  _toggleSelectionMode(initialSelectionId: subfolder.id);
+                }
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FolderCard(
+                    folder: subfolder,
+                    onTap: () {
+                      if (_isSelectionMode) {
+                        _toggleItemSelection(subfolder.id);
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => FolderViewPage(folder: subfolder),
+                          ),
+                        );
+                      }
+                    },
+                    onRename: (f, newName) => _renameFolder(context, f, newName),
+                    onDelete: (f) => _deleteFolder(context, f),
+                    onCustomize: (f, icon, color) =>
+                        _customizeFolder(context, f, icon, color),
+                  ),
+                  if (_isSelectionMode)
+                    _buildSelectionOverlay(isSelected, isFolder: true),
+                ],
+              ),
+            );
+          },
+          childCount: subfolders.length,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFileGrid(List<VaultFile> files, List<VaultFile> allFiles, bool addTopPadding) {
+    return SliverPadding(
+      padding: EdgeInsets.fromLTRB(8.0, addTopPadding ? 16.0 : 0.0, 8.0, 8.0),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final vaultFile = files[index];
+            final isSelected = _selectedItemIds.contains(vaultFile.id);
+            final physicalFile = folderFiles.firstWhere(
+              (f) => p.basename(f.path) == vaultFile.id,
+              orElse: () => File(''),
+            );
+
+            if (physicalFile.path.isEmpty) {
+              return const Center(
+                  child: Icon(Icons.broken_image, color: Colors.grey));
+            }
+
+            return GestureDetector(
+              onTap: () {
+                if (_isSelectionMode) {
+                  _toggleItemSelection(vaultFile.id);
+                } else {
+                  final overallIndex = allFiles.indexWhere((f) => f.id == vaultFile.id);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PhotoViewPage(
+                        files: allFiles,
+                        initialIndex: overallIndex,
+                        parentFolder: currentFolder,
+                      ),
+                    ),
+                  );
+                }
+              },
+              onLongPress: () {
+                if (!_isSelectionMode) {
+                  _toggleSelectionMode(initialSelectionId: vaultFile.id);
+                }
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _buildThumbnail(physicalFile),
+                  ),
+                  if (_isSelectionMode) _buildSelectionOverlay(isSelected),
+                ],
+              ),
+            );
+          },
+          childCount: files.length,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+        child: Divider(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+        ),
+      ),
     );
   }
 
@@ -569,7 +496,7 @@ class _FolderViewPageState extends State<FolderViewPage>
               Icons.drive_file_move_outline, 'Transfer', _transferSelectedFiles),
           _buildBottomAction(Icons.delete, 'Recycle', _recycleSelectedItems),
           _buildBottomAction(
-              Icons.favorite_border, 'Favourite', _favouritePlaceholder),
+              Icons.favorite, 'Favourite', _toggleFavoriteSelectedFiles),
           _buildBottomAction(Icons.share_outlined, 'Share', _sharePlaceholder),
         ],
       ),
@@ -597,10 +524,48 @@ class _FolderViewPageState extends State<FolderViewPage>
   // --- Placeholder and Action Methods for Bottom Bar ---
   void _unhidePlaceholder() => ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Unhide coming soon!')));
-  void _favouritePlaceholder() => ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Favourite coming soon!')));
   void _sharePlaceholder() => ScaffoldMessenger.of(context)
       .showSnackBar(const SnackBar(content: Text('Share coming soon!')));
+
+  Future<void> _toggleFavoriteSelectedFiles() async {
+    if (_selectedItemIds.isEmpty) return;
+
+    final subfolderIds = _getSubfolders().map((f) => f.id).toSet();
+    final hasFolders = _selectedItemIds.any((id) => subfolderIds.contains(id));
+
+    if (hasFolders) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content:
+                  Text('Folders cannot be favorited. Please select only files.')),
+        );
+      }
+      return;
+    }
+    
+    final firstFile = _vaultFiles.firstWhere(
+      (f) => f.id == _selectedItemIds.first,
+    );
+    final bool markAsFavorite = !firstFile.isFavorite;
+
+    for (final id in _selectedItemIds) {
+      final fileToUpdate = _vaultFiles.firstWhere((f) => f.id == id);
+      if (fileToUpdate.isFavorite != markAsFavorite) {
+         final updatedFile = fileToUpdate.copyWith(isFavorite: markAsFavorite);
+         await StorageHelper.updateFileMetadata(updatedFile, currentFolder);
+      }
+    }
+    
+    if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(markAsFavorite ? 'Added to favorites.' : 'Removed from favorites.')),
+      );
+    }
+    
+    _toggleSelectionMode();
+    await _loadAllFolderContents();
+  }
 
   Future<void> _transferSelectedFiles() async {
     if (_selectedItemIds.isEmpty) return;
@@ -631,44 +596,23 @@ class _FolderViewPageState extends State<FolderViewPage>
 
     if (destinationFolder == null || !mounted) return;
 
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Confirm Transfer'),
-        content: Text(
-            'Are you sure you want to move ${_selectedItemIds.length} item(s) to the "${destinationFolder.name}" folder?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Transfer'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && mounted) {
-      for (final id in _selectedItemIds) {
-        final fileToMove = _vaultFiles.firstWhere((f) => f.id == id);
-        await StorageHelper.transferFile(
-            fileToMove, currentFolder, destinationFolder);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  '${_selectedItemIds.length} item(s) transferred to "${destinationFolder.name}"')),
-        );
-      }
-
-      _toggleSelectionMode();
-      await refreshItemCounts();
-      await _loadAllFolderContents();
+    for (final id in _selectedItemIds) {
+      final fileToMove = _vaultFiles.firstWhere((f) => f.id == id);
+      await StorageHelper.transferFile(
+          fileToMove, currentFolder, destinationFolder);
     }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                '${_selectedItemIds.length} item(s) transferred to "${destinationFolder.name}"')),
+      );
+    }
+
+    _toggleSelectionMode();
+    await refreshItemCounts();
+    await _loadAllFolderContents();
   }
 
   Future<void> _recycleSelectedItems() async {
