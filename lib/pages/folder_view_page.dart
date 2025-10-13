@@ -36,7 +36,7 @@ class _FolderViewPageState extends State<FolderViewPage>
   bool _isSelectionMode = false;
   final Set<String> _selectedItemIds = {};
 
-  // State for hold-drag-select gesture
+  // ✨ MODIFIED: State for hold-drag-select gesture
   final GlobalKey _folderGridKey = GlobalKey();
   final GlobalKey _favoriteFileGridKey = GlobalKey();
   final GlobalKey _otherFileGridKey = GlobalKey();
@@ -67,7 +67,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     _fabAnimationController.dispose();
     _loadingController.dispose(); // ✨ ADDED: Dispose the loading controller
     foldersNotifier.removeListener(_onFoldersChanged);
-    clearSharedImageCache(); 
+    // ✨ REMOVED: clearSharedImageCache() is no longer needed.
     super.dispose();
   }
 
@@ -85,62 +85,56 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
-  /// ✨ REFINED: Load contents and perform self-healing synchronization.
+  /// ✨ REWRITTEN: Re-implements self-healing logic for the database.
   Future<void> _loadAllFolderContents() async {
-    final physicalFiles = await StorageHelper.getFolderContents(currentFolder);
-    List<VaultFile> fileMetadata = await StorageHelper.loadVaultFileIndex(currentFolder);
+    // Fetch both physical files and database records.
+    final physicalFilesResult = await StorageHelper.getFolderContents(currentFolder);
+    List<VaultFile> fileMetadata = await StorageHelper.getFilesForFolder(currentFolder);
+
+    bool needsUiRefresh = false;
 
     // --- Self-Healing Logic ---
-    bool needsUpdate = false;
-    
-    // Create sets for efficient lookup
-    final physicalFileNames = physicalFiles.map((f) => p.basename(f.path)).toSet();
+    final physicalFileNames = physicalFilesResult.map((f) => p.basename(f.path)).toSet();
     final metadataFileIds = fileMetadata.map((mf) => mf.id).toSet();
 
-    // 1. Find orphan files (exist on disk but not in metadata)
+    // 1. Find orphan files (exist on disk but not in database)
     final orphanFiles = physicalFileNames.difference(metadataFileIds);
     if (orphanFiles.isNotEmpty) {
-      needsUpdate = true;
+      needsUiRefresh = true;
       for (final fileName in orphanFiles) {
-        final physicalFile = physicalFiles.firstWhere((f) => p.basename(f.path) == fileName);
-        fileMetadata.add(VaultFile(
+        final newRecord = VaultFile(
           id: fileName,
-          fileName: fileName, // Use the actual file name as a fallback
-          originalPath: 'unknown', // Original path is lost
+          fileName: 'recovered_file', // Use a placeholder name
+          originalPath: 'unknown',
           dateAdded: DateTime.now(),
           originalParentPath: currentFolder.id,
-        ));
+        );
+        await StorageHelper.addFileRecord(newRecord);
+        fileMetadata.add(newRecord); // Add to local list for immediate UI update
       }
     }
 
-    // 2. Find ghost metadata (exists in metadata but not on disk)
-    final ghostMetadataIds = metadataFileIds.difference(physicalFileNames);
-    if (ghostMetadataIds.isNotEmpty) {
-      needsUpdate = true;
-      fileMetadata.removeWhere((mf) => ghostMetadataIds.contains(mf.id));
+    // 2. Find ghost records (exist in database but not on disk)
+    final ghostRecordIds = metadataFileIds.difference(physicalFileNames);
+    if (ghostRecordIds.isNotEmpty) {
+      needsUiRefresh = true;
+      for (final fileId in ghostRecordIds) {
+        await StorageHelper.deleteFileRecord(fileId);
+      }
+      fileMetadata.removeWhere((mf) => ghostRecordIds.contains(mf.id));
     }
 
-    // 3. If inconsistencies were found, save the corrected metadata
-    if (needsUpdate) {
-      await StorageHelper.saveVaultFileIndex(currentFolder, fileMetadata);
+    // If we made changes, refresh the parent folder's item count.
+    if (needsUiRefresh) {
       await refreshItemCounts();
     }
-    
+
     if (mounted) {
       setState(() {
-        folderFiles = physicalFiles;
+        folderFiles = physicalFilesResult;
         _vaultFiles = fileMetadata;
-        _isLoading = false; // ✨ MODIFIED: Hide loading indicator when done
+        _isLoading = false; // Hide loading indicator when done
       });
-      _preloadInitialImages();
-    }
-  }
-
-  /// Preloads the first few images in the folder into the shared cache.
-  void _preloadInitialImages() {
-    final allImages = _vaultFiles.where((f) => _isImage(f.id)).toList();
-    for (int i = 0; i < allImages.length && i < 6; i++) {
-      preloadImage(allImages[i], context);
     }
   }
 
@@ -420,7 +414,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
   }
 
-  // ✨ ADDED: Widget to display the timed loading indicator
+  /// ✨ ADDED: Widget to display the timed loading indicator
   Widget _buildLoadingIndicator() {
     return AnimatedBuilder(
       animation: _loadingController,
@@ -718,7 +712,7 @@ class _FolderViewPageState extends State<FolderViewPage>
       final fileToUpdate = _vaultFiles.firstWhere((f) => f.id == id);
       if (fileToUpdate.isFavorite != markAsFavorite) {
          final updatedFile = fileToUpdate.copyWith(isFavorite: markAsFavorite);
-         await StorageHelper.updateFileMetadata(updatedFile, currentFolder);
+         await StorageHelper.updateFileMetadata(updatedFile); // ✨ MODIFIED: Parent folder no longer needed
       }
     }
     

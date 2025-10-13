@@ -11,7 +11,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _requestStoragePermission();
 
-  final loadedFolders = await StorageHelper.loadAllFoldersFromDisk();
+  // ✨ MODIFIED: Load folders from the database instead of scanning the disk.
+  final loadedFolders = await StorageHelper.getAllFolders();
   if (loadedFolders.isEmpty) {
     final defaultFolders = getDefaultFolders();
     for (final folder in defaultFolders) {
@@ -22,7 +23,7 @@ void main() async {
     foldersNotifier.value = loadedFolders;
   }
 
-  // ✨ NEW: Refresh counts on startup
+  // Refresh counts on startup using the new database functions.
   await refreshItemCounts();
 
   runApp(const VaultApp());

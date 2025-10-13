@@ -156,8 +156,8 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
 
     if (confirmed == true && mounted) {
       for (final file in _selectedItems) {
-        await StorageHelper.restoreFileFromRecycleBin(
-            file, foldersNotifier.value);
+        // ✨ MODIFIED: Call the updated database method
+        await StorageHelper.restoreFileFromRecycleBin(file);
       }
 
       await refreshItemCounts();

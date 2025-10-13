@@ -1,8 +1,7 @@
 // lib/data/notifiers.dart
 import 'package:flutter/material.dart';
 import 'package:vlt/models/vault_folder.dart';
-import 'dart:io'; // ✨ ADDED: Needed for File type
-import 'package:vlt/utils/storage_helper.dart'; // ✨ ADDED: Needed for refresh function
+import 'package:vlt/utils/storage_helper.dart';
 
 
 /// --- NOTIFIERS ---
@@ -55,26 +54,24 @@ List<VaultFolder> getDefaultFolders() {
   ];
 }
 
-/// ✨ NEW: Central function to refresh all item counts.
+/// ✨ MODIFIED: Central function to refresh all item counts using efficient database queries.
 Future<void> refreshItemCounts() async {
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-  final List<VaultFolder> foldersWithRefreshedCounts = [];
-
+  
   for (final folder in currentFolders) {
-    // Get physical files
-    final contents = await StorageHelper.getFolderContents(folder);
-    final fileCount = contents.whereType<File>().length;
-
-    // Get subfolders from our in-memory list
-    final subfolderCount = currentFolders.where((sub) => sub.parentPath == folder.id).length;
-
-    // Create a new folder instance with the updated total count
-    foldersWithRefreshedCounts.add(folder.copyWith(itemCount: subfolderCount + fileCount));
+    // Get counts directly from the database, which is much faster.
+    final fileCount = await StorageHelper.getFileCount(folder.id);
+    final subfolderCount = await StorageHelper.getSubfolderCount(folder.id);
+    
+    // Update the item count on the existing folder object.
+    folder.itemCount = subfolderCount + fileCount;
   }
 
-  // Update the notifier to rebuild the UI with correct counts
-  foldersNotifier.value = foldersWithRefreshedCounts;
+  // Update the notifier to rebuild the UI with correct counts.
+  // Creating a new list from the modified one to ensure the ValueNotifier detects the change.
+  foldersNotifier.value = List<VaultFolder>.from(currentFolders);
 }
+
 
 /// --- CONSTANTS FOR UI OPTIONS ---
 

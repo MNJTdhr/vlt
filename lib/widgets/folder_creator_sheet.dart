@@ -220,13 +220,14 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
       creationDate: DateTime.now(),
     );
 
+    // ✨ MODIFIED: This now calls the database-aware createFolder method.
     await StorageHelper.createFolder(newFolder);
 
     // Update the app's state list
     final updatedList = List<VaultFolder>.from(foldersNotifier.value)..add(newFolder);
     foldersNotifier.value = updatedList;
 
-    // ✨ FIX: Refresh the item counts for all folders to update the parent's count.
+    // Refresh the item counts for all folders to update the parent's count.
     await refreshItemCounts();
 
     if (widget.onFolderCreated != null) {

@@ -115,8 +115,6 @@ class HomePage extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final folder = rootFolders[index];
                     
-                    // The itemCount is now directly from the notifier, which is kept up-to-date.
-                    // No need for on-the-fly calculation here anymore.
                     return FolderCard(
                       folder: folder,
                       onTap: () {
@@ -176,7 +174,7 @@ class HomePage extends StatelessWidget {
   }
 }
 
-/// Renames a folder's metadata.
+/// Renames a folder's metadata in the database.
 void _renameFolder(
   BuildContext context,
   VaultFolder folder,
@@ -199,13 +197,13 @@ void _renameFolder(
   }
 }
 
-/// Deletes a folder and all its contents, then refreshes item counts.
+/// Deletes a folder and all its contents from the database, then refreshes item counts.
 void _deleteFolder(BuildContext context, VaultFolder folder) async {
   await StorageHelper.deleteFolder(folder);
 
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
+  // Find all children recursively to remove from the notifier list in one go.
   final List<String> idsToDelete = [folder.id];
-  
   void findChildren(String parentId) {
       final children = currentFolders.where((f) => f.parentPath == parentId);
       for (final child in children) {
@@ -218,7 +216,7 @@ void _deleteFolder(BuildContext context, VaultFolder folder) async {
   currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
   foldersNotifier.value = currentFolders;
 
-  // ✨ FIX: Refresh the item counts for all folders.
+  // Refresh the item counts for all remaining folders.
   await refreshItemCounts();
 
   if (ScaffoldMessenger.of(context).mounted) {
@@ -228,7 +226,7 @@ void _deleteFolder(BuildContext context, VaultFolder folder) async {
   }
 }
 
-/// Customizes a folder's metadata.
+/// Customizes a folder's metadata in the database.
 void _customizeFolder(
   BuildContext context,
   VaultFolder folder,

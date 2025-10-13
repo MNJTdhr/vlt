@@ -272,8 +272,8 @@ class _RecycleBinPhotoViewPageState extends State<RecycleBinPhotoViewPage>
     );
 
     if (confirmed == true && mounted) {
-      await StorageHelper.restoreFileFromRecycleBin(
-          currentFile, foldersNotifier.value);
+      // ✨ MODIFIED: Call the updated database method
+      await StorageHelper.restoreFileFromRecycleBin(currentFile);
       await refreshItemCounts();
       if (mounted) Navigator.of(context).pop();
     }
@@ -301,7 +301,7 @@ class _RecycleBinPhotoViewPageState extends State<RecycleBinPhotoViewPage>
 
     if (confirmed == true && mounted) {
       await StorageHelper.permanentlyDeleteFile(currentFile);
-      await refreshItemCounts();
+      await refreshItemCounts(); // Although the item is gone, parent counts might need refresh.
       if (mounted) Navigator.of(context).pop();
     }
   }

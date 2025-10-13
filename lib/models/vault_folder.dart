@@ -15,22 +15,23 @@ class VaultFolder {
   /// Folder color used for UI themes
   final Color color;
 
-  /// Number of items in the folder (files + subfolders)
-  final int itemCount;
-
   /// The ID of the folder’s parent ("root" for top-level folders)
   final String parentPath;
 
   /// The date and time the folder was created.
   final DateTime creationDate;
+  
+  /// Number of items in the folder (files + subfolders).
+  /// This is not stored in the database and is calculated dynamically.
+  int itemCount;
 
   /// Constructor to initialize all required properties
-  const VaultFolder({
+  VaultFolder({
     required this.id,
     required this.name,
     required this.icon,
     required this.color,
-    required this.itemCount,
+    this.itemCount = 0, // ✨ MODIFIED: Now has a default value and is not final
     required this.parentPath,
     required this.creationDate,
   });
@@ -56,40 +57,39 @@ class VaultFolder {
     );
   }
 
-  /// Convert to JSON for file persistence
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'iconCodePoint': icon.codePoint,
-    'iconFontFamily': icon.fontFamily,
-    'iconFontPackage': icon.fontPackage,
-    'color': color.value,
-    'itemCount': itemCount,
-    'parentPath': parentPath,
-    'creationDate': creationDate.toIso8601String(),
-  };
+  // ✨ --- DATABASE METHODS --- ✨
 
-  /// Load from JSON map into usable VaultFolder object
-  factory VaultFolder.fromJson(Map<String, dynamic> json) {
+  /// Converts the VaultFolder object to a Map for database insertion.
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'iconCodePoint': icon.codePoint,
+      'iconFontFamily': icon.fontFamily,
+      'iconFontPackage': icon.fontPackage,
+      'color': color.value,
+      'parentPath': parentPath,
+      'creationDate': creationDate.toIso8601String(),
+    };
+  }
+
+  /// Creates a VaultFolder object from a Map retrieved from the database.
+  factory VaultFolder.fromMap(Map<String, dynamic> map) {
     return VaultFolder(
-      id: json['id'],
-      name: json['name'],
+      id: map['id'],
+      name: map['name'],
       icon: IconData(
-        json['iconCodePoint'],
-        fontFamily: json['iconFontFamily'],
-        fontPackage: json['iconFontPackage'],
+        map['iconCodePoint'],
+        fontFamily: map['iconFontFamily'],
+        fontPackage: map['iconFontPackage'],
       ),
-      color: Color(json['color']),
-      itemCount: json['itemCount'],
-      parentPath: json['parentPath'] ?? 'root',
-      creationDate: json['creationDate'] != null
-          ? DateTime.parse(json['creationDate'])
-          : DateTime.now(),
+      color: Color(map['color']),
+      parentPath: map['parentPath'],
+      creationDate: DateTime.parse(map['creationDate']),
+      // itemCount is not in the map, it will be populated later.
     );
   }
 }
-
-// ✨ --- CORRECTED VaultFile DATA MODEL --- ✨
 
 /// Represents a single file within a vault folder.
 class VaultFile {
@@ -111,10 +111,10 @@ class VaultFile {
   /// The date the file was moved to the recycle bin (for auto-purge features).
   final DateTime? deletionDate;
 
-  // ✨ FIX: Stores the ID of the folder where the file originally lived.
+  /// Stores the ID of the folder where the file originally lived.
   final String originalParentPath;
   
-  // ✨ NEW: A flag to indicate if the file is a favorite.
+  /// A flag to indicate if the file is a favorite.
   final bool isFavorite;
 
   const VaultFile({
@@ -125,7 +125,7 @@ class VaultFile {
     this.isInRecycleBin = false,
     this.deletionDate,
     required this.originalParentPath,
-    this.isFavorite = false, // ✨ ADDED with default value
+    this.isFavorite = false,
   });
 
   /// Creates a new instance with updated properties.
@@ -138,7 +138,7 @@ class VaultFile {
     bool setDeletionDateToNull = false,
     DateTime? deletionDate,
     String? originalParentPath,
-    bool? isFavorite, // ✨ ADDED
+    bool? isFavorite,
   }) {
     return VaultFile(
       id: id ?? this.id,
@@ -151,35 +151,39 @@ class VaultFile {
           : (deletionDate ?? this.deletionDate),
       originalParentPath:
           originalParentPath ?? this.originalParentPath,
-      isFavorite: isFavorite ?? this.isFavorite, // ✨ ADDED
+      isFavorite: isFavorite ?? this.isFavorite,
     );
   }
 
-  /// Converts the object to a JSON map for file persistence.
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'fileName': fileName,
-    'originalPath': originalPath,
-    'dateAdded': dateAdded.toIso8601String(),
-    'isInRecycleBin': isInRecycleBin,
-    'deletionDate': deletionDate?.toIso8601String(),
-    'originalParentPath': originalParentPath,
-    'isFavorite': isFavorite, // ✨ ADDED
-  };
+  // ✨ --- DATABASE METHODS --- ✨
 
-  /// Creates a VaultFile object from a JSON map.
-  factory VaultFile.fromJson(Map<String, dynamic> json) {
+  /// Converts the VaultFile object to a Map for database insertion.
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'fileName': fileName,
+      'originalPath': originalPath,
+      'dateAdded': dateAdded.toIso8601String(),
+      'isInRecycleBin': isInRecycleBin ? 1 : 0, // Convert bool to integer
+      'deletionDate': deletionDate?.toIso8601String(),
+      'originalParentPath': originalParentPath,
+      'isFavorite': isFavorite ? 1 : 0, // Convert bool to integer
+    };
+  }
+
+  /// Creates a VaultFile object from a Map retrieved from the database.
+  factory VaultFile.fromMap(Map<String, dynamic> map) {
     return VaultFile(
-      id: json['id'],
-      fileName: json['fileName'],
-      originalPath: json['originalPath'],
-      dateAdded: DateTime.parse(json['dateAdded']),
-      isInRecycleBin: json['isInRecycleBin'] ?? false,
-      deletionDate: json['deletionDate'] != null
-          ? DateTime.parse(json['deletionDate'])
+      id: map['id'],
+      fileName: map['fileName'],
+      originalPath: map['originalPath'],
+      dateAdded: DateTime.parse(map['dateAdded']),
+      isInRecycleBin: map['isInRecycleBin'] == 1, // Convert integer to bool
+      deletionDate: map['deletionDate'] != null
+          ? DateTime.parse(map['deletionDate'])
           : null,
-      originalParentPath: json['originalParentPath'] ?? 'root',
-      isFavorite: json['isFavorite'] ?? false, // ✨ ADDED with fallback
+      originalParentPath: map['originalParentPath'],
+      isFavorite: map['isFavorite'] == 1, // Convert integer to bool
     );
   }
 }
