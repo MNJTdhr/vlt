@@ -22,22 +22,25 @@ class FolderViewPage extends StatefulWidget {
 }
 
 class _FolderViewPageState extends State<FolderViewPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin { // ✨ MODIFIED: Changed to support multiple controllers
   late VaultFolder currentFolder;
   List<File> folderFiles = [];
   List<VaultFile> _vaultFiles = [];
 
   late AnimationController _fabAnimationController;
+  late AnimationController _loadingController; // ✨ ADDED: Controller for loading animation
   bool isFabMenuOpen = false;
+  bool _isLoading = true; // ✨ ADDED: State for loading indicator
 
   // State for selection mode
   bool _isSelectionMode = false;
   final Set<String> _selectedItemIds = {};
 
   // State for hold-drag-select gesture
-  final GlobalKey _gridKey = GlobalKey();
+  final GlobalKey _folderGridKey = GlobalKey();
+  final GlobalKey _favoriteFileGridKey = GlobalKey();
+  final GlobalKey _otherFileGridKey = GlobalKey();
   int? _lastDraggedIndex;
-  Timer? _longPressTimer;
   bool _isDragSelecting = false;
 
 
@@ -49,6 +52,12 @@ class _FolderViewPageState extends State<FolderViewPage>
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
+    // ✨ ADDED: Initialize and start the loading animation controller
+    _loadingController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..forward();
+
     foldersNotifier.addListener(_onFoldersChanged);
     _loadAllFolderContents();
   }
@@ -56,8 +65,9 @@ class _FolderViewPageState extends State<FolderViewPage>
   @override
   void dispose() {
     _fabAnimationController.dispose();
+    _loadingController.dispose(); // ✨ ADDED: Dispose the loading controller
     foldersNotifier.removeListener(_onFoldersChanged);
-    _longPressTimer?.cancel();
+    clearSharedImageCache(); 
     super.dispose();
   }
 
@@ -113,7 +123,6 @@ class _FolderViewPageState extends State<FolderViewPage>
     // 3. If inconsistencies were found, save the corrected metadata
     if (needsUpdate) {
       await StorageHelper.saveVaultFileIndex(currentFolder, fileMetadata);
-      // Also refresh the overall item counts for UI consistency
       await refreshItemCounts();
     }
     
@@ -121,10 +130,19 @@ class _FolderViewPageState extends State<FolderViewPage>
       setState(() {
         folderFiles = physicalFiles;
         _vaultFiles = fileMetadata;
+        _isLoading = false; // ✨ MODIFIED: Hide loading indicator when done
       });
+      _preloadInitialImages();
     }
   }
 
+  /// Preloads the first few images in the folder into the shared cache.
+  void _preloadInitialImages() {
+    final allImages = _vaultFiles.where((f) => _isImage(f.id)).toList();
+    for (int i = 0; i < allImages.length && i < 6; i++) {
+      preloadImage(allImages[i], context);
+    }
+  }
 
   void _toggleFabMenu() {
     setState(() {
@@ -234,6 +252,106 @@ class _FolderViewPageState extends State<FolderViewPage>
     });
   }
 
+  // --- DRAG-TO-SELECT LOGIC ---
+  void _onPanStart(DragStartDetails details) {
+    if (_isSelectionMode) {
+      _isDragSelecting = true;
+      _handleDragSelection(details.globalPosition);
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (_isDragSelecting) {
+      _handleDragSelection(details.globalPosition);
+    }
+  }
+
+  void _onPanEnd(DragEndDetails details) {
+    _isDragSelecting = false;
+    _lastDraggedIndex = null;
+  }
+
+  void _handleDragSelection(Offset globalPosition) {
+    // Check folder grid
+    _updateSelectionForGrid(
+      globalPosition: globalPosition,
+      gridKey: _folderGridKey,
+      crossAxisCount: 2,
+      childAspectRatio: 1.1,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
+      items: _getSubfolders(),
+      baseIndex: 0,
+    );
+
+    final favoriteFiles = _vaultFiles.where((f) => f.isFavorite).toList();
+    // Check favorite files grid
+    _updateSelectionForGrid(
+      globalPosition: globalPosition,
+      gridKey: _favoriteFileGridKey,
+      crossAxisCount: 3,
+      childAspectRatio: 1.0,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      items: favoriteFiles,
+      baseIndex: _getSubfolders().length,
+    );
+
+    // Check other files grid
+    _updateSelectionForGrid(
+      globalPosition: globalPosition,
+      gridKey: _otherFileGridKey,
+      crossAxisCount: 3,
+      childAspectRatio: 1.0,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      items: _vaultFiles.where((f) => !f.isFavorite).toList(),
+      baseIndex: _getSubfolders().length + favoriteFiles.length,
+    );
+  }
+
+  void _updateSelectionForGrid({
+    required Offset globalPosition,
+    required GlobalKey gridKey,
+    required int crossAxisCount,
+    required double childAspectRatio,
+    required double crossAxisSpacing,
+    required double mainAxisSpacing,
+    required List<dynamic> items,
+    required int baseIndex,
+  }) {
+    final renderBox = gridKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.hasSize) return;
+
+    final localPos = renderBox.globalToLocal(globalPosition);
+
+    if (localPos.dx >= 0 &&
+        localPos.dx <= renderBox.size.width &&
+        localPos.dy >= 0 &&
+        localPos.dy <= renderBox.size.height) {
+      final itemWidth = (renderBox.size.width - (crossAxisSpacing * (crossAxisCount - 1))) / crossAxisCount;
+      final itemHeight = itemWidth / childAspectRatio;
+
+      final col = (localPos.dx / (itemWidth + crossAxisSpacing)).floor().clamp(0, crossAxisCount - 1);
+      final row = (localPos.dy / (itemHeight + mainAxisSpacing)).floor();
+
+      final index = (row * crossAxisCount) + col;
+      final globalIndex = baseIndex + index;
+
+      if (index >= 0 && index < items.length && globalIndex != _lastDraggedIndex) {
+        final item = items[index];
+        final itemId = item.id as String;
+
+        if (!_selectedItemIds.contains(itemId)) {
+          setState(() {
+            _selectedItemIds.add(itemId);
+          });
+        }
+        _lastDraggedIndex = globalIndex;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final subfolders = _getSubfolders();
@@ -242,61 +360,102 @@ class _FolderViewPageState extends State<FolderViewPage>
     final isEmpty =
         otherFiles.isEmpty && favoriteFiles.isEmpty && subfolders.isEmpty;
 
-    return Scaffold(
-      appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
-      body: isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.folder_open, size: 64, color: currentFolder.color),
-                  const SizedBox(height: 16),
-                  Text(
-                    'The "${currentFolder.name}" folder is empty.',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Click the + button to add content.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
+    return WillPopScope(
+      onWillPop: () async {
+        if (_isSelectionMode) {
+          _toggleSelectionMode(); // Deactivate selection mode
+          return false; // Prevent popping the route
+        }
+        return true; // Allow popping the route
+      },
+      child: Scaffold(
+        appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
+        body: _isLoading
+            ? _buildLoadingIndicator()
+            : GestureDetector(
+                onPanStart: _onPanStart,
+                onPanUpdate: _onPanUpdate,
+                onPanEnd: _onPanEnd,
+                child: isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.folder_open, size: 64, color: currentFolder.color),
+                            const SizedBox(height: 16),
+                            Text(
+                              'The "${currentFolder.name}" folder is empty.',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Click the + button to add content.',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      )
+                    : CustomScrollView(
+                        physics: const BouncingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics()),
+                        slivers: [
+                          if (subfolders.isNotEmpty) _buildFolderGrid(subfolders, _folderGridKey),
+                          if (subfolders.isNotEmpty && (favoriteFiles.isNotEmpty || otherFiles.isNotEmpty))
+                            _buildDivider(),
+                          if (favoriteFiles.isNotEmpty)
+                            _buildFileGrid(favoriteFiles, _vaultFiles, subfolders.isEmpty, _favoriteFileGridKey),
+                          if (favoriteFiles.isNotEmpty && otherFiles.isNotEmpty)
+                            _buildDivider(),
+                          if (otherFiles.isNotEmpty)
+                            _buildFileGrid(
+                                otherFiles, _vaultFiles, subfolders.isEmpty && favoriteFiles.isEmpty, _otherFileGridKey),
+                        ],
+                      ),
               ),
-            )
-          : RefreshIndicator(
-              onRefresh: () async {
-                if (!_isSelectionMode) {
-                  await _loadAllFolderContents();
-                }
-              },
-              child: CustomScrollView(
-                physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics()),
-                slivers: [
-                  if (subfolders.isNotEmpty) _buildFolderGrid(subfolders),
-                  if (subfolders.isNotEmpty && (favoriteFiles.isNotEmpty || otherFiles.isNotEmpty))
-                    _buildDivider(),
-                  if (favoriteFiles.isNotEmpty)
-                    _buildFileGrid(favoriteFiles, _vaultFiles, subfolders.isEmpty),
-                  if (favoriteFiles.isNotEmpty && otherFiles.isNotEmpty)
-                    _buildDivider(),
-                  if (otherFiles.isNotEmpty)
-                    _buildFileGrid(
-                        otherFiles, _vaultFiles, subfolders.isEmpty && favoriteFiles.isEmpty),
-                ],
-              ),
-            ),
-      floatingActionButton: _isSelectionMode ? null : _buildFabMenu(),
-      bottomNavigationBar: _isSelectionMode && _selectedItemIds.isNotEmpty
-          ? _buildBottomActionBar()
-          : null,
+        floatingActionButton: _isSelectionMode ? null : _buildFabMenu(),
+        bottomNavigationBar: _isSelectionMode && _selectedItemIds.isNotEmpty
+            ? _buildBottomActionBar()
+            : null,
+      ),
     );
   }
 
-  Widget _buildFolderGrid(List<VaultFolder> subfolders) {
+  // ✨ ADDED: Widget to display the timed loading indicator
+  Widget _buildLoadingIndicator() {
+    return AnimatedBuilder(
+      animation: _loadingController,
+      builder: (context, child) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 60,
+                height: 60,
+                child: CircularProgressIndicator(
+                  value: _loadingController.value,
+                  strokeWidth: 5,
+                  backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Loading Content...',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFolderGrid(List<VaultFolder> subfolders, GlobalKey gridKey) {
     return SliverPadding(
       padding: const EdgeInsets.all(16.0),
       sliver: SliverGrid(
+        key: gridKey,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16,
@@ -347,10 +506,11 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
   }
 
-  Widget _buildFileGrid(List<VaultFile> files, List<VaultFile> allFiles, bool addTopPadding) {
+  Widget _buildFileGrid(List<VaultFile> files, List<VaultFile> allFiles, bool addTopPadding, GlobalKey gridKey) {
     return SliverPadding(
       padding: EdgeInsets.fromLTRB(8.0, addTopPadding ? 16.0 : 0.0, 8.0, 8.0),
       sliver: SliverGrid(
+        key: gridKey,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           crossAxisSpacing: 8,
@@ -371,21 +531,26 @@ class _FolderViewPageState extends State<FolderViewPage>
             }
 
             return GestureDetector(
-              onTap: () {
+              onTap: () async {
                 if (_isSelectionMode) {
                   _toggleItemSelection(vaultFile.id);
                 } else {
-                  final overallIndex = allFiles.indexWhere((f) => f.id == vaultFile.id);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PhotoViewPage(
-                        files: allFiles,
-                        initialIndex: overallIndex,
-                        parentFolder: currentFolder,
+                  final allImages = _vaultFiles.where((f) => _isImage(f.id)).toList();
+                  final initialIndex = allImages.indexWhere((f) => f.id == vaultFile.id);
+                  
+                  if (initialIndex != -1) {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PhotoViewPage(
+                          files: allImages,
+                          initialIndex: initialIndex,
+                          parentFolder: currentFolder,
+                        ),
                       ),
-                    ),
-                  );
+                    );
+                    await _loadAllFolderContents();
+                  }
                 }
               },
               onLongPress: () {

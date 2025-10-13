@@ -23,6 +23,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   // ✨ NEW: State for drag-to-select gesture
   final GlobalKey _gridKey = GlobalKey();
   int? _lastDraggedIndex;
+  bool _isDragSelecting = false; // ✅ Track whether a drag selection is in progress
 
   @override
   void initState() {
@@ -80,9 +81,9 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
     }
   }
 
-  /// ✨ NEW: Handles the drag gesture to select multiple items.
+  /// ✨ Handles the drag gesture to select multiple items after long-press.
   void _onDragUpdate(DragUpdateDetails details) {
-    if (!_isSelectionMode) return;
+    if (!_isSelectionMode || !_isDragSelecting) return;
 
     final RenderBox? gridRenderBox =
         _gridKey.currentContext?.findRenderObject() as RenderBox?;
@@ -114,6 +115,11 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       }
       _lastDraggedIndex = index;
     }
+  }
+
+  void _onDragEnd([DragEndDetails? details]) {
+    _lastDraggedIndex = null;
+    _isDragSelecting = false;
   }
 
   void _selectAll() {
@@ -235,29 +241,27 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
                     ],
                   ),
                 )
-              : GestureDetector(
-                  onPanStart: (details) {
-                    if (!_isSelectionMode) {
-                      _toggleSelectionMode();
-                    }
-                  },
-                  onPanUpdate: _onDragUpdate,
-                  onPanEnd: (details) => _lastDraggedIndex = null,
-                  child: GridView.builder(
-                    key: _gridKey,
-                    padding: const EdgeInsets.all(8),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
+              : Listener(
+                  onPointerUp: (_) => _onDragEnd(),
+                  child: GestureDetector(
+                    onPanUpdate: _onDragUpdate,
+                    onPanEnd: _onDragEnd,
+                    child: GridView.builder(
+                      key: _gridKey,
+                      padding: const EdgeInsets.all(8),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemCount: _recycledFiles.length,
+                      itemBuilder: (context, index) {
+                        final file = _recycledFiles[index];
+                        final isSelected = _selectedItems.contains(file);
+                        return _buildGridItem(file, isSelected);
+                      },
                     ),
-                    itemCount: _recycledFiles.length,
-                    itemBuilder: (context, index) {
-                      final file = _recycledFiles[index];
-                      final isSelected = _selectedItems.contains(file);
-                      return _buildGridItem(file, isSelected);
-                    },
                   ),
                 ),
       bottomNavigationBar:
@@ -307,10 +311,16 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   Widget _buildGridItem(VaultFile file, bool isSelected) {
     return GestureDetector(
       onTap: () => _onItemTap(file),
-      onLongPress: () {
+      onLongPressStart: (_) {
+        // ✅ Long-press starts selection mode and enables drag-select
         if (!_isSelectionMode) {
           _toggleSelectionMode(initialSelection: file);
+        } else {
+          setState(() {
+            _selectedItems.add(file);
+          });
         }
+        _isDragSelecting = true;
       },
       child: Stack(
         fit: StackFit.expand,

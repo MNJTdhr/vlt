@@ -2,6 +2,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
@@ -12,6 +14,54 @@ import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 import 'package:vlt/widgets/file_transfer_sheet.dart';
 import 'package:vlt/widgets/slideshow_options_sheet.dart';
+
+// ✨ --- SHARED CACHE LOGIC --- ✨
+
+/// A shared cache for decoded images accessible across different widgets.
+final Map<String, Future<Uint8List>> sharedImageCache = {};
+
+/// A helper class to pass parameters to the background isolate for decoding.
+class _DecodeParam {
+  final File file;
+  final int width;
+  _DecodeParam(this.file, this.width);
+}
+
+/// A top-level function that runs in the background to decode and resize an image.
+Future<Uint8List> _decodeAndResizeImage(_DecodeParam param) async {
+  final bytes = await param.file.readAsBytes();
+  final image = img.decodeImage(bytes);
+  if (image != null) {
+    final resized = img.copyResize(image, width: param.width);
+    return Uint8List.fromList(img.encodePng(resized));
+  }
+  return bytes;
+}
+
+/// Public function to start preloading an image into the shared cache.
+void preloadImage(VaultFile vaultFile, BuildContext context) {
+  if (sharedImageCache.containsKey(vaultFile.id)) return;
+
+  final future = Future(() async {
+    final folderDir = await StorageHelper.findFolderDirectoryById(vaultFile.originalParentPath);
+    if (folderDir == null) throw Exception('Folder not found');
+    
+    final file = File(p.join(folderDir.path, vaultFile.id));
+    if (!await file.exists()) throw Exception('File not found');
+    
+    final screenWidth = MediaQuery.of(context).size.width * MediaQuery.of(context).devicePixelRatio;
+    
+    return compute(_decodeAndResizeImage, _DecodeParam(file, screenWidth.round()));
+  });
+
+  sharedImageCache[vaultFile.id] = future;
+}
+
+/// Public function to clear the shared cache, useful for managing memory.
+void clearSharedImageCache() {
+  sharedImageCache.clear();
+}
+
 
 class PhotoViewPage extends StatefulWidget {
   final List<VaultFile> files;
@@ -44,12 +94,13 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   Duration _slideshowTransitionDuration = const Duration(milliseconds: 400);
   bool _isSlideshowRandom = false;
 
-
   final TransformationController _transformationController =
       TransformationController();
   late AnimationController _zoomAnimationController;
   Animation<Matrix4>? _zoomAnimation;
   Offset? _doubleTapPosition;
+
+  bool _isInitialLoad = true;
 
   @override
   void initState() {
@@ -79,6 +130,28 @@ class _PhotoViewPageState extends State<PhotoViewPage>
         setState(() => _isZoomed = true);
       }
     });
+  }
+  
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isInitialLoad) {
+      _loadInitialImages();
+      _isInitialLoad = false;
+    }
+  }
+
+  void _loadInitialImages() {
+    // Preload the current image, 2 ahead, and 2 behind.
+    for (int i = -2; i <= 2; i++) {
+      _loadImage(_currentIndex + i);
+    }
+  }
+
+  void _loadImage(int index) {
+    if (index < 0 || index >= _updatableFiles.length) return;
+    final vaultFile = _updatableFiles[index];
+    preloadImage(vaultFile, context);
   }
 
   @override
@@ -159,18 +232,34 @@ class _PhotoViewPageState extends State<PhotoViewPage>
                 ? _buildSlideshowView()
                 : _buildInteractiveView(),
 
-            AnimatedOpacity(
-              opacity: _showUI ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !_showUI,
-                child: Column(
-                  children: [
-                    _buildAppBar(),
-                    const Spacer(),
-                    _buildBottomToolbar(),
-                  ],
-                ),
+            // ✨ MODIFIED: Replaced AnimatedOpacity with a Stack of AnimatedSlide widgets.
+            IgnorePointer(
+              ignoring: !_showUI,
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedSlide(
+                      offset: _showUI ? Offset.zero : const Offset(0, -1.5),
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOutCubic,
+                      child: _buildAppBar(),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedSlide(
+                      offset: _showUI ? Offset.zero : const Offset(0, 1.5),
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOutCubic,
+                      child: _buildBottomToolbar(),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -192,8 +281,13 @@ class _PhotoViewPageState extends State<PhotoViewPage>
           _currentIndex = index;
           _transformationController.value = Matrix4.identity();
         });
+        // Pre-load next images for smooth swiping
+        _loadImage(index + 2);
+        _loadImage(index - 2);
       },
       itemBuilder: (context, index) {
+        // Ensure the image is being loaded if it's not already
+        _loadImage(index);
         return _buildImagePage(_updatableFiles[index]);
       },
     );
@@ -201,7 +295,6 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   
   /// A view for the automated slideshow with fade transitions.
   Widget _buildSlideshowView() {
-    // ✨ FIX: Wrap the AnimatedSwitcher in a Center widget.
     return Center(
       child: AnimatedSwitcher(
         duration: _slideshowTransitionDuration,
@@ -215,44 +308,55 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       ),
     );
   }
+  
+  // ✨ MODIFIED: Helper method to provide a child for the AnimatedSwitcher.
+  Widget _buildContentForSnapshot(AsyncSnapshot<Uint8List> snapshot) {
+    if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+      return Image.memory(
+        snapshot.data!,
+        key: ValueKey<String>('image_${snapshot.hashCode}'),
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+      );
+    }
+    if (snapshot.hasError) {
+      return Container(
+        key: const ValueKey<String>('error'),
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.white, size: 60),
+      );
+    }
+    return Container(
+      key: const ValueKey<String>('loading'),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
+    );
+  }
 
-  /// A reusable function to build the content of a single page (image).
+  /// ✨ MODIFIED: Uses an AnimatedSwitcher for smooth cross-fading.
   Widget _buildImagePage(VaultFile vaultFile, {Key? key}) {
-    return FutureBuilder<Directory?>(
+    final imageFuture = sharedImageCache[vaultFile.id];
+
+    return GestureDetector(
       key: key,
-      future: StorageHelper.findFolderDirectoryById(vaultFile.originalParentPath),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done && snapshot.data != null) {
-          final filePath = p.join(snapshot.data!.path, vaultFile.id);
-          final file = File(filePath);
-
-          if (!file.existsSync()) {
-            return const Center(child: Icon(Icons.broken_image, color: Colors.white, size: 60));
-          }
-
-          return GestureDetector(
-            onTap: _onViewTap,
-            onDoubleTapDown: _handleDoubleTapDown,
-            onDoubleTap: _handleDoubleTap,
-            onVerticalDragEnd: _handleVerticalDragEnd,
-            child: ClipRect(
-              child: InteractiveViewer(
-                transformationController: _transformationController,
-                minScale: 1.0,
-                maxScale: 4.0,
-                child: Image.file(
-                  file,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Center(
-                    child: Icon(Icons.broken_image, color: Colors.white, size: 60),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
-        return const Center(child: CircularProgressIndicator());
-      },
+      onTap: _onViewTap,
+      onDoubleTapDown: _handleDoubleTapDown,
+      onDoubleTap: _handleDoubleTap,
+      onVerticalDragEnd: _handleVerticalDragEnd,
+      child: InteractiveViewer(
+        transformationController: _transformationController,
+        minScale: 1.0,
+        maxScale: 4.0,
+        child: FutureBuilder<Uint8List>(
+          future: imageFuture,
+          builder: (context, snapshot) {
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _buildContentForSnapshot(snapshot),
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -399,6 +503,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
         nextIndex = (_currentIndex + 1) % _updatableFiles.length; // Loop back
       }
       
+      // Preload the next image *before* updating the state
+      _loadImage(nextIndex + 1);
+
       setState(() {
         _currentIndex = nextIndex;
       });
@@ -515,7 +622,18 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     if (!await file.exists()) return;
 
     final fileStat = await file.stat();
-    final decodedImage = img.decodeImage(await file.readAsBytes());
+    
+    // Use the cached image data if available
+    final imageFuture = sharedImageCache[vaultFile.id];
+    Uint8List? imageBytes;
+    if (imageFuture != null) {
+      imageBytes = await imageFuture;
+    } else {
+      // Fallback if not cached (should be rare)
+      imageBytes = await file.readAsBytes();
+    }
+    
+    final decodedImage = await compute(img.decodeImage, imageBytes);
 
     final fileSize = NumberFormat.compact().format(fileStat.size);
     final dimensions = decodedImage != null
