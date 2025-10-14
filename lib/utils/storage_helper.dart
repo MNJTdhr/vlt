@@ -13,6 +13,10 @@ class StorageHelper {
   static const String _recycleBinId = '.recycle_bin';
   static const _uuid = Uuid();
 
+  // ✨ MODIFIED: Added comments to clarify the purpose of this directory.
+  /// Gets the root directory for the vault's files.
+  /// This path is in shared storage (`Android/media`), which means it will
+  /// NOT be deleted if the user uninstalls the app, ensuring data persistence.
   static Future<Directory> getVaultRootDirectory() async {
     final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
     if (!(await dir.exists())) {
@@ -37,7 +41,7 @@ class StorageHelper {
   static Future<Directory?> findFolderDirectoryById(String folderId) async {
     final root = await getVaultRootDirectory();
     if (folderId == _recycleBinId) return getRecycleBinDirectory();
-    
+
     final db = await DatabaseHelper().database;
     final List<Map<String, dynamic>> maps = await db.query(
       'folders',
@@ -49,9 +53,9 @@ class StorageHelper {
       debugPrint('Error finding folder by ID: $folderId not found in database.');
       return null;
     }
-    
+
     final folder = VaultFolder.fromMap(maps.first);
-    
+
     Directory parentDir;
     if (folder.parentPath == 'root') {
       parentDir = await getVaultRootDirectory();
@@ -60,7 +64,7 @@ class StorageHelper {
       if (parent == null) return null;
       parentDir = parent;
     }
-    
+
     final folderDir = Directory(p.join(parentDir.path, folder.id));
     if (!await folderDir.exists()) {
       await folderDir.create(recursive: true);
@@ -72,18 +76,18 @@ class StorageHelper {
 
   static Future<void> createFolder(VaultFolder newFolder) async {
     if (!await requestStoragePermission()) return;
-    
+
     final parentDir = newFolder.parentPath == 'root'
         ? await getVaultRootDirectory()
         : await findFolderDirectoryById(newFolder.parentPath);
-    
+
     if (parentDir != null) {
       final folderDir = Directory(p.join(parentDir.path, newFolder.id));
       if (!await folderDir.exists()) {
         await folderDir.create(recursive: true);
       }
     }
-    
+
     final db = await DatabaseHelper().database;
     await db.insert(
       'folders',
@@ -104,7 +108,7 @@ class StorageHelper {
 
   static Future<void> deleteFolder(VaultFolder folderToDelete) async {
     final db = await DatabaseHelper().database;
-    
+
     final List<String> folderIdsToDelete = [folderToDelete.id];
     final List<VaultFile> filesToDelete = [];
 
@@ -151,7 +155,7 @@ class StorageHelper {
 
     final newFileName = '${_uuid.v4()}${p.extension(file.path)}';
     final newFilePath = p.join(folderDir.path, newFileName);
-    
+
     await file.copy(newFilePath);
 
     final vaultFile = VaultFile(
@@ -161,7 +165,7 @@ class StorageHelper {
       dateAdded: DateTime.now(),
       originalParentPath: folder.id,
     );
-    
+
     await addFileRecord(vaultFile);
   }
 
@@ -184,7 +188,7 @@ class StorageHelper {
       whereArgs: [updatedFile.id],
     );
   }
-  
+
   static Future<List<VaultFile>> getFilesForFolder(VaultFolder folder) async {
     final db = await DatabaseHelper().database;
     final List<Map<String, dynamic>> maps = await db.query(
@@ -245,12 +249,12 @@ class StorageHelper {
     final destinationDir = await findFolderDirectoryById(fileToRestore.originalParentPath);
     final recycleBinDir = await getRecycleBinDirectory();
     if (destinationDir == null) return;
-    
+
     final sourceFile = File(p.join(recycleBinDir.path, fileToRestore.id));
     if (await sourceFile.exists()) {
       await sourceFile.rename(p.join(destinationDir.path, fileToRestore.id));
     }
-    
+
     final restoredFile = fileToRestore.copyWith(isInRecycleBin: false, setDeletionDateToNull: true);
     await updateFileMetadata(restoredFile);
   }
@@ -313,7 +317,7 @@ class StorageHelper {
     final result = await db.rawQuery('SELECT COUNT(*) FROM folders WHERE parentPath = ?', [parentId]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
-  
+
   static Future<int> getFileCount(String parentId) async {
     final db = await DatabaseHelper().database;
     final result = await db.rawQuery('SELECT COUNT(*) FROM files WHERE originalParentPath = ? AND isInRecycleBin = 0', [parentId]);

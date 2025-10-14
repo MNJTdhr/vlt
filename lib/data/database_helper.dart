@@ -1,4 +1,5 @@
 // lib/data/database_helper.dart
+import 'dart:io'; // ✨ ADDED: Needed for the Directory class.
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -17,11 +18,25 @@ class DatabaseHelper {
     return _database!;
   }
 
+  // ✨ ADDED: A private method to get the persistent storage directory.
+  // This directory will NOT be deleted when the app is uninstalled.
+  Future<Directory> _getDbDirectory() async {
+    // We choose a path that is not in the app's private data folder.
+    final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
+    if (!(await dir.exists())) {
+      // Create the directory if it doesn't exist.
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+
   /// Initializes the database by opening it and creating tables if they don't exist.
   Future<Database> _initDatabase() async {
-    // Get the default databases location.
-    String path = join(await getDatabasesPath(), 'vault.db');
-    
+    // ✨ MODIFIED: Get the path to our new persistent directory.
+    Directory documentsDirectory = await _getDbDirectory();
+    String path = join(documentsDirectory.path, 'vault.db');
+
     // Open the database. The `onCreate` callback is called only the first time
     // the database is created.
     return await openDatabase(
