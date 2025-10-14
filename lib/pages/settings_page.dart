@@ -1,6 +1,8 @@
 // lib/pages/settings_page.dart
 import 'package:flutter/material.dart';
-import 'recycle_bin_page.dart'; // ✨ NEW: Import the new page we are about to create.
+import '../utils/storage_helper.dart'; // ✅ Needed for rebuild function
+import '../data/notifiers.dart';       // ✅ To refresh UI after rebuild
+import 'recycle_bin_page.dart';        // ✨ Recycle bin import
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -30,6 +32,52 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  Future<void> _confirmAndRebuildDatabase(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rebuild Database'),
+        content: const Text(
+          'This will rescan your vault folder on disk and restore any missing folders or files to the database.\n\n'
+          'It will NOT delete anything.\n\nProceed?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Rebuild'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Rebuilding database... Please wait.')),
+    );
+
+    try {
+      await StorageHelper.rebuildDatabaseFromDisk();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Database successfully rebuilt and refreshed!'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Failed to rebuild database: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // The Scaffold's AppBar was removed because the MainScreen already provides one.
@@ -41,13 +89,22 @@ class SettingsPage extends StatelessWidget {
           context: context,
           icon: Icons.delete_outline,
           label: 'Recycle Bin',
-          // ✨ CHANGED: Navigate to the new RecycleBinPage.
           onTap: () {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const RecycleBinPage()),
             );
           },
+        ),
+
+        const Divider(),
+
+        // 🧰 Rebuild Database (NEW FEATURE)
+        _buildSettingButton(
+          context: context,
+          icon: Icons.build,
+          label: 'Rebuild Database',
+          onTap: () => _confirmAndRebuildDatabase(context),
         ),
 
         const Divider(),

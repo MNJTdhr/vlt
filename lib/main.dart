@@ -11,19 +11,33 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _requestStoragePermission();
 
-  // ✨ MODIFIED: Load folders from the database instead of scanning the disk.
+  // ✨ STEP 1: Load folders from the database.
   final loadedFolders = await StorageHelper.getAllFolders();
+
   if (loadedFolders.isEmpty) {
-    final defaultFolders = getDefaultFolders();
-    for (final folder in defaultFolders) {
-      await StorageHelper.createFolder(folder);
+    // ✨ If database is empty, rebuild from disk first.
+    debugPrint('📂 No folders found in database. Attempting to rebuild from disk...');
+    await StorageHelper.rebuildDatabaseFromDisk();
+
+    // After rebuilding, check again for folders.
+    final recoveredFolders = await StorageHelper.getAllFolders();
+    if (recoveredFolders.isEmpty) {
+      // If still empty, create default folders (first run).
+      debugPrint('🆕 Database still empty after rebuild. Creating default folders.');
+      final defaultFolders = getDefaultFolders();
+      for (final folder in defaultFolders) {
+        await StorageHelper.createFolder(folder);
+      }
+      foldersNotifier.value = defaultFolders;
+    } else {
+      debugPrint('✅ Recovered ${recoveredFolders.length} folders from disk.');
+      foldersNotifier.value = recoveredFolders;
     }
-    foldersNotifier.value = defaultFolders;
   } else {
     foldersNotifier.value = loadedFolders;
   }
 
-  // Refresh counts on startup using the new database functions.
+  // ✨ STEP 2: Ensure counts are up to date.
   await refreshItemCounts();
 
   runApp(const VaultApp());
