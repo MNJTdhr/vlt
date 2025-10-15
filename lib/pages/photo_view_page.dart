@@ -318,7 +318,8 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       onTap: _onViewTap,
       onDoubleTapDown: _handleDoubleTapDown,
       onDoubleTap: _handleDoubleTap,
-      onVerticalDragEnd: _handleVerticalDragEnd,
+      // ✨ MODIFIED: The swipe-to-dismiss gesture is now disabled when the image is zoomed in.
+      onVerticalDragEnd: _isZoomed ? null : _handleVerticalDragEnd,
       child: InteractiveViewer(
         transformationController: _transformationController,
         minScale: 1.0,

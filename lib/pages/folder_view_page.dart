@@ -1,11 +1,15 @@
 // lib/pages/folder_view_page.dart
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart'; // ✨ ADDED: For cache directory
 import 'package:permission_handler/permission_handler.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:vlt/pages/photo_view_page.dart';
+import 'package:vlt/pages/video_view_page.dart';
 import 'package:vlt/widgets/file_transfer_sheet.dart';
 import 'package:vlt/widgets/folder_card.dart';
 import 'package:vlt/widgets/folder_creator_sheet.dart';
@@ -22,27 +26,26 @@ class FolderViewPage extends StatefulWidget {
 }
 
 class _FolderViewPageState extends State<FolderViewPage>
-    with TickerProviderStateMixin { // ✨ MODIFIED: Changed to support multiple controllers
+    with TickerProviderStateMixin {
   late VaultFolder currentFolder;
   List<File> folderFiles = [];
   List<VaultFile> _vaultFiles = [];
 
   late AnimationController _fabAnimationController;
-  late AnimationController _loadingController; // ✨ ADDED: Controller for loading animation
+  late AnimationController _loadingController;
   bool isFabMenuOpen = false;
-  bool _isLoading = true; // ✨ ADDED: State for loading indicator
+  bool _isLoading = true;
 
   // State for selection mode
   bool _isSelectionMode = false;
   final Set<String> _selectedItemIds = {};
 
-  // ✨ MODIFIED: State for hold-drag-select gesture
+  // State for hold-drag-select gesture
   final GlobalKey _folderGridKey = GlobalKey();
   final GlobalKey _favoriteFileGridKey = GlobalKey();
   final GlobalKey _otherFileGridKey = GlobalKey();
   int? _lastDraggedIndex;
   bool _isDragSelecting = false;
-
 
   @override
   void initState() {
@@ -52,7 +55,6 @@ class _FolderViewPageState extends State<FolderViewPage>
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
-    // ✨ ADDED: Initialize and start the loading animation controller
     _loadingController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -65,9 +67,8 @@ class _FolderViewPageState extends State<FolderViewPage>
   @override
   void dispose() {
     _fabAnimationController.dispose();
-    _loadingController.dispose(); // ✨ ADDED: Dispose the loading controller
+    _loadingController.dispose();
     foldersNotifier.removeListener(_onFoldersChanged);
-    // ✨ REMOVED: clearSharedImageCache() is no longer needed.
     super.dispose();
   }
 
@@ -85,9 +86,7 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
-  /// ✨ REWRITTEN: Re-implements self-healing logic for the database.
   Future<void> _loadAllFolderContents() async {
-    // Fetch both physical files and database records.
     final physicalFilesResult = await StorageHelper.getFolderContents(currentFolder);
     List<VaultFile> fileMetadata = await StorageHelper.getFilesForFolder(currentFolder);
 
@@ -97,24 +96,24 @@ class _FolderViewPageState extends State<FolderViewPage>
     final physicalFileNames = physicalFilesResult.map((f) => p.basename(f.path)).toSet();
     final metadataFileIds = fileMetadata.map((mf) => mf.id).toSet();
 
-    // 1. Find orphan files (exist on disk but not in database)
+    // 1. Find orphan files
     final orphanFiles = physicalFileNames.difference(metadataFileIds);
     if (orphanFiles.isNotEmpty) {
       needsUiRefresh = true;
       for (final fileName in orphanFiles) {
         final newRecord = VaultFile(
           id: fileName,
-          fileName: 'recovered_file', // Use a placeholder name
+          fileName: 'recovered_file',
           originalPath: 'unknown',
           dateAdded: DateTime.now(),
           originalParentPath: currentFolder.id,
         );
         await StorageHelper.addFileRecord(newRecord);
-        fileMetadata.add(newRecord); // Add to local list for immediate UI update
+        fileMetadata.add(newRecord);
       }
     }
 
-    // 2. Find ghost records (exist in database but not on disk)
+    // 2. Find ghost records
     final ghostRecordIds = metadataFileIds.difference(physicalFileNames);
     if (ghostRecordIds.isNotEmpty) {
       needsUiRefresh = true;
@@ -124,7 +123,6 @@ class _FolderViewPageState extends State<FolderViewPage>
       fileMetadata.removeWhere((mf) => ghostRecordIds.contains(mf.id));
     }
 
-    // If we made changes, refresh the parent folder's item count.
     if (needsUiRefresh) {
       await refreshItemCounts();
     }
@@ -133,7 +131,7 @@ class _FolderViewPageState extends State<FolderViewPage>
       setState(() {
         folderFiles = physicalFilesResult;
         _vaultFiles = fileMetadata;
-        _isLoading = false; // Hide loading indicator when done
+        _isLoading = false;
       });
     }
   }
@@ -414,7 +412,6 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
   }
 
-  /// ✨ ADDED: Widget to display the timed loading indicator
   Widget _buildLoadingIndicator() {
     return AnimatedBuilder(
       animation: _loadingController,
@@ -528,16 +525,32 @@ class _FolderViewPageState extends State<FolderViewPage>
               onTap: () async {
                 if (_isSelectionMode) {
                   _toggleItemSelection(vaultFile.id);
-                } else {
+                } else if (_isImage(vaultFile.id)) {
                   final allImages = _vaultFiles.where((f) => _isImage(f.id)).toList();
                   final initialIndex = allImages.indexWhere((f) => f.id == vaultFile.id);
-                  
+
                   if (initialIndex != -1) {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => PhotoViewPage(
                           files: allImages,
+                          initialIndex: initialIndex,
+                          parentFolder: currentFolder,
+                        ),
+                      ),
+                    );
+                    await _loadAllFolderContents();
+                  }
+                } else if (_isVideo(vaultFile.id)) {
+                  final allVideos = _vaultFiles.where((f) => _isVideo(f.id)).toList();
+                  final initialIndex = allVideos.indexWhere((f) => f.id == vaultFile.id);
+                  if (initialIndex != -1) {
+                     await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VideoViewPage(
+                          files: allVideos,
                           initialIndex: initialIndex,
                           parentFolder: currentFolder,
                         ),
@@ -557,7 +570,7 @@ class _FolderViewPageState extends State<FolderViewPage>
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: _buildThumbnail(physicalFile),
+                    child: _buildThumbnail(physicalFile, vaultFile.id), // ✨ MODIFIED: Pass fileId for caching
                   ),
                   if (_isSelectionMode) _buildSelectionOverlay(isSelected),
                 ],
@@ -712,7 +725,7 @@ class _FolderViewPageState extends State<FolderViewPage>
       final fileToUpdate = _vaultFiles.firstWhere((f) => f.id == id);
       if (fileToUpdate.isFavorite != markAsFavorite) {
          final updatedFile = fileToUpdate.copyWith(isFavorite: markAsFavorite);
-         await StorageHelper.updateFileMetadata(updatedFile); // ✨ MODIFIED: Parent folder no longer needed
+         await StorageHelper.updateFileMetadata(updatedFile);
       }
     }
     
@@ -776,7 +789,6 @@ class _FolderViewPageState extends State<FolderViewPage>
 
   Future<void> _recycleSelectedItems() async {
     if (_selectedItemIds.isEmpty) return;
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -800,7 +812,6 @@ class _FolderViewPageState extends State<FolderViewPage>
 
     final allSubfolders = _getSubfolders();
     final allFiles = _vaultFiles;
-
     for (final id in Set<String>.from(_selectedItemIds)) {
       final fileMatch = allFiles.where((f) => f.id == id);
       if (fileMatch.isNotEmpty) {
@@ -839,7 +850,6 @@ class _FolderViewPageState extends State<FolderViewPage>
     final index = currentFolders.indexWhere((f) => f.id == folder.id);
     if (index != -1) currentFolders[index] = updatedFolder;
     foldersNotifier.value = currentFolders;
-
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -865,7 +875,6 @@ class _FolderViewPageState extends State<FolderViewPage>
     currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
     foldersNotifier.value = currentFolders;
     await refreshItemCounts();
-
     if (showSnackbar && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Folder "${folder.name}" deleted')),
@@ -886,7 +895,6 @@ class _FolderViewPageState extends State<FolderViewPage>
     final index = currentFolders.indexWhere((f) => f.id == folder.id);
     if (index != -1) currentFolders[index] = updatedFolder;
     foldersNotifier.value = currentFolders;
-
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Folder "${folder.name}" customized')),
@@ -895,7 +903,43 @@ class _FolderViewPageState extends State<FolderViewPage>
   }
 
   // --- Thumbnail helpers ---
-  Widget _buildThumbnail(File file) {
+
+  // ✨ REWRITTEN: This function now implements caching for fast loading.
+  Future<Uint8List?> _generateVideoThumbnail(String videoPath, String fileId) async {
+    // 1. Define the path for the cached thumbnail image.
+    final tempDir = await getTemporaryDirectory();
+    final cacheFile = File(p.join(tempDir.path, 'thumbnails', '$fileId.jpg'));
+
+    // 2. If a cached thumbnail already exists, use it instantly.
+    if (await cacheFile.exists()) {
+      return await cacheFile.readAsBytes();
+    }
+
+    // 3. If not, generate a new one, save it to the cache, then return it.
+    try {
+      final thumbnailBytes = await VideoThumbnail.thumbnailData(
+        video: videoPath,
+        imageFormat: ImageFormat.JPEG,
+        timeMs: 2000, // ✨ Take frame from the 2-second mark
+        maxWidth: 200, // Keep the generated image small for performance
+        quality: 50,
+      );
+
+      if (thumbnailBytes != null) {
+        // Ensure the cache directory exists
+        await cacheFile.parent.create(recursive: true);
+        // Save the generated thumbnail for next time
+        await cacheFile.writeAsBytes(thumbnailBytes);
+        return thumbnailBytes;
+      }
+    } catch (e) {
+      debugPrint('Failed to generate or cache thumbnail for $videoPath: $e');
+    }
+    return null; // Return null if generation fails
+  }
+  
+  // ✨ MODIFIED: Now takes fileId to enable caching.
+  Widget _buildThumbnail(File file, String fileId) {
     final path = file.path;
     if (_isImage(path)) {
       return Image.file(
@@ -904,12 +948,28 @@ class _FolderViewPageState extends State<FolderViewPage>
         errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
       );
     } else if (_isVideo(path)) {
-      return Stack(
-        fit: StackFit.expand,
-        children: const [
-          ColoredBox(color: Colors.black12),
-          Center(child: Icon(Icons.play_circle, color: Colors.white, size: 36)),
-        ],
+      return FutureBuilder<Uint8List?>(
+        future: _generateVideoThumbnail(path, fileId), // ✨ Use new caching function
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done && snapshot.hasData && snapshot.data != null) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.memory(
+                  snapshot.data!,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                ),
+                const Center(child: Icon(Icons.play_circle, color: Colors.white70, size: 36)),
+              ],
+            );
+          }
+          // Show a placeholder with a progress indicator while loading.
+          return Container(
+            color: Colors.black12,
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        },
       );
     } else {
       return const Icon(Icons.insert_drive_file);

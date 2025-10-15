@@ -40,6 +40,9 @@ void main() async {
   // ✨ STEP 2: Ensure counts are up to date.
   await refreshItemCounts();
 
+  // ✨ ADDED: Load the saved theme preference on startup.
+  await loadThemePreference();
+
   runApp(const VaultApp());
 }
 
@@ -109,8 +112,9 @@ class MainScreen extends StatelessWidget {
                 valueListenable: selectedThemeNotifier,
                 builder: (context, isDarkMode, child) {
                   return IconButton(
+                    // ✨ MODIFIED: This now calls a function to save the theme preference.
                     onPressed: () {
-                      selectedThemeNotifier.value = !selectedThemeNotifier.value;
+                      toggleThemePreference();
                     },
                     icon: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 300),
