@@ -1809,6 +1809,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1908,7 +1909,8 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
   Future<void> _resolveFolderDirAndPrecache() async {
     // Resolve once
-    final dir = await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    final dir =
+        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
     if (!mounted) return;
     setState(() {
       _parentFolderDir = dir;
@@ -1985,7 +1987,8 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     final end = Matrix4.identity();
     if (targetScale != 1.0) {
       // Calculate translation so tapped point stays under the finger after scale
-      end.translate(-position.dx * (targetScale - 1), -position.dy * (targetScale - 1));
+      end.translate(-position.dx * (targetScale - 1),
+          -position.dy * (targetScale - 1));
       end.scale(targetScale);
     }
 
@@ -2072,7 +2075,10 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
   Widget _buildInteractiveView() {
     return PageView.builder(
-      physics: _isZoomed ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+      // ✨ MODIFIED: Changed physics for a more responsive, less "heavy" swipe feel.
+      physics: _isZoomed
+          ? const NeverScrollableScrollPhysics()
+          : const ClampingScrollPhysics(),
       controller: _pageController,
       itemCount: _updatableFiles.length,
       onPageChanged: (index) {
@@ -2121,7 +2127,6 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       onTap: _onViewTap,
       onDoubleTapDown: _handleDoubleTapDown,
       onDoubleTap: _handleDoubleTap,
-      // ✨ MODIFIED: The swipe-to-dismiss gesture is now disabled when the image is zoomed in.
       onVerticalDragEnd: _isZoomed ? null : _handleVerticalDragEnd,
       child: InteractiveViewer(
         transformationController: _transformationController,
@@ -2174,7 +2179,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       title: Text(vaultFile.fileName, overflow: TextOverflow.ellipsis),
       actions: [
         IconButton(
-          icon: Icon(_isSlideshowActive ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+          icon: Icon(_isSlideshowActive
+              ? Icons.stop_circle_outlined
+              : Icons.play_circle_outline),
           tooltip: _isSlideshowActive ? 'Stop Slideshow' : 'Start Slideshow',
           onPressed: () {
             if (_isSlideshowActive) {
@@ -2205,9 +2212,12 @@ class _PhotoViewPageState extends State<PhotoViewPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildBottomAction(Icons.lock_open, 'Unhide', _unhidePlaceholder),
-            _buildBottomAction(Icons.drive_file_move_outline, 'Transfer', _showTransferSheet),
-            _buildBottomAction(Icons.delete, 'Recycle', _moveCurrentFileToRecycleBin),
+            _buildBottomAction(Icons.drive_file_move_outline, 'Transfer',
+                _showTransferSheet),
+            _buildBottomAction(
+                Icons.edit, 'Rename', _showRenameDialog), 
+            _buildBottomAction(
+                Icons.delete, 'Recycle', _moveCurrentFileToRecycleBin),
             _buildFavoriteButton(currentFile),
             _buildBottomAction(Icons.share_outlined, 'Share', _shareCurrentFile),
           ],
@@ -2237,7 +2247,8 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     );
   }
 
-  Widget _buildBottomAction(IconData icon, String label, VoidCallback onPressed) {
+  Widget _buildBottomAction(
+      IconData icon, String label, VoidCallback onPressed) {
     return GestureDetector(
       onTap: onPressed,
       child: Column(
@@ -2315,11 +2326,66 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   // --- Other Action Methods ---
-  void _unhidePlaceholder() => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unhide coming soon!')));
+  void _unhidePlaceholder() => ScaffoldMessenger.of(context)
+      .showSnackBar(const SnackBar(content: Text('Unhide coming soon!')));
+
+  Future<void> _showRenameDialog() async {
+    final currentFile = _updatableFiles[_currentIndex];
+    final TextEditingController controller =
+        TextEditingController(text: currentFile.fileName);
+
+    final String? newName = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Rename File'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: 'Enter new name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final trimmedName = controller.text.trim();
+                if (trimmedName.isNotEmpty) {
+                  Navigator.of(context).pop(trimmedName);
+                }
+              },
+              child: const Text('Rename'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newName != null && newName != currentFile.fileName) {
+      final updatedFile = currentFile.copyWith(fileName: newName);
+
+      // Update state locally for instant UI change
+      setState(() {
+        _updatableFiles[_currentIndex] = updatedFile;
+      });
+
+      // Update in the database
+      await StorageHelper.updateFileMetadata(updatedFile);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('File renamed to "$newName"')),
+        );
+      }
+    }
+  }
 
   Future<void> _toggleFavorite() async {
     final currentFile = _updatableFiles[_currentIndex];
-    final updatedFile = currentFile.copyWith(isFavorite: !currentFile.isFavorite);
+    final updatedFile =
+        currentFile.copyWith(isFavorite: !currentFile.isFavorite);
 
     setState(() {
       _updatableFiles[_currentIndex] = updatedFile;
@@ -2333,7 +2399,8 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
     final currentFile = _updatableFiles[_currentIndex];
 
-    final VaultFolder? destinationFolder = await showModalBottomSheet<VaultFolder>(
+    final VaultFolder? destinationFolder =
+        await showModalBottomSheet<VaultFolder>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => SizedBox(
@@ -2343,12 +2410,14 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     );
 
     if (destinationFolder != null && mounted) {
-      await StorageHelper.transferFile(currentFile, widget.parentFolder, destinationFolder);
+      await StorageHelper.transferFile(
+          currentFile, widget.parentFolder, destinationFolder);
       await refreshItemCounts();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File transferred to "${destinationFolder.name}"')),
+          SnackBar(
+              content: Text('File transferred to "${destinationFolder.name}"')),
         );
         Navigator.of(context).pop();
       }
@@ -2364,16 +2433,22 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Move to Recycle Bin'),
-        content: Text('Are you sure you want to move "${currentFile.fileName}" to the recycle bin?'),
+        content: Text(
+            'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Move')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Move')),
         ],
       ),
     );
 
     if (confirmed == true && mounted) {
-      await StorageHelper.moveFileToRecycleBin(currentFile, widget.parentFolder);
+      await StorageHelper.moveFileToRecycleBin(
+          currentFile, widget.parentFolder);
       await refreshItemCounts();
       if (mounted) Navigator.of(context).pop();
     }
@@ -2399,21 +2474,18 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     final file = File(p.join(_parentFolderDir!.path, vaultFile.id));
     if (!await file.exists()) return;
 
+    // Get the easy/fast info first
     final fileStat = await file.stat();
-    final imageBytes = await file.readAsBytes();
-
-    // Use compute to decode image for dimensions only when requested (keeps UI responsive)
-    final decodedImage = await compute(img.decodeImage, imageBytes);
-
     final fileSize = NumberFormat.compact().format(fileStat.size);
-    final dimensions = decodedImage != null ? '${decodedImage.width} × ${decodedImage.height}' : 'N/A';
     final dateAdded = DateFormat.yMMMd().add_jm().format(vaultFile.dateAdded);
 
+    // Show the sheet without waiting for dimensions
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.grey[900],
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
@@ -2422,28 +2494,34 @@ class _PhotoViewPageState extends State<PhotoViewPage>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Expanded(
-                    child: Text(
-                      vaultFile.fileName,
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Action placeholder')));
-                    },
-                    icon: const Icon(Icons.copy, color: Colors.white70),
-                  ),
-                ]),
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          vaultFile.fileName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              fontSize: 16),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showRenameDialog();
+                        },
+                        icon: const Icon(Icons.edit, color: Colors.white70),
+                        tooltip: 'Rename',
+                      ),
+                    ]),
                 const Divider(height: 20, color: Colors.white24),
                 const SizedBox(height: 6),
                 _infoRow('Path:', '/${widget.parentFolder.name}'),
                 _infoRow('Original Path:', vaultFile.originalPath),
                 _infoRow('File Size:', fileSize),
-                _infoRow('Dimensions:', dimensions),
+                _AsyncDimensionsRow(imageFile: file),
                 _infoRow('Date Added:', dateAdded),
                 const SizedBox(height: 12),
               ],
@@ -2460,9 +2538,80 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           width: 110,
-          child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+          child: Text(label,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.white70)),
         ),
-        Expanded(child: Text(value, style: const TextStyle(color: Colors.white70), overflow: TextOverflow.ellipsis, maxLines: 3)),
+        Expanded(
+            child: Text(value,
+                style: const TextStyle(color: Colors.white70),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 3)),
+      ]),
+    );
+  }
+}
+
+class _AsyncDimensionsRow extends StatefulWidget {
+  final File imageFile;
+
+  const _AsyncDimensionsRow({required this.imageFile});
+
+  @override
+  State<_AsyncDimensionsRow> createState() => _AsyncDimensionsRowState();
+}
+
+class _AsyncDimensionsRowState extends State<_AsyncDimensionsRow> {
+  String _dimensions = 'Loading...';
+
+  @override
+  void initState() {
+    super.initState();
+    _getDimensions();
+  }
+
+  Future<void> _getDimensions() async {
+    try {
+      // This heavy work now happens independently without blocking the UI
+      final bytes = await widget.imageFile.readAsBytes();
+      final decodedImage = await compute(img.decodeImage, bytes);
+
+      if (mounted && decodedImage != null) {
+        setState(() {
+          _dimensions = '${decodedImage.width} × ${decodedImage.height}';
+        });
+      } else if (mounted) {
+        setState(() {
+          _dimensions = 'N/A';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error decoding image for dimensions: $e');
+      if (mounted) {
+        setState(() {
+          _dimensions = 'Error';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // This rebuilds only itself when the dimensions are ready
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SizedBox(
+          width: 110,
+          child: Text('Dimensions:',
+              style:
+                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+        ),
+        Expanded(
+            child: Text(_dimensions,
+                style: const TextStyle(color: Colors.white70),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 3)),
       ]),
     );
   }
