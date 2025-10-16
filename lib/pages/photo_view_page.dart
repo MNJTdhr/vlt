@@ -62,6 +62,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   // Cache for FileImages to avoid recreating providers
   final Map<int, FileImage> _imageProviderCache = {};
 
+  // ✨ ADDED: State to track pointer count for fixing gesture conflicts.
+  int _pointerCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -270,28 +273,34 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     );
   }
 
+  // ✨ MODIFIED: This is now the final, correct implementation for smooth gallery swiping.
   Widget _buildInteractiveView() {
-    return PageView.builder(
-      // ✨ MODIFIED: Changed physics for a more responsive, less "heavy" swipe feel.
-      physics: _isZoomed
-          ? const NeverScrollableScrollPhysics()
-          : const ClampingScrollPhysics(),
-      controller: _pageController,
-      itemCount: _updatableFiles.length,
-      onPageChanged: (index) {
-        setState(() {
-          _currentIndex = index;
-          // Reset zoom transformation for new page
-          _transformationController.value = Matrix4.identity();
-          _isZoomed = false;
-        });
+    return Listener(
+      onPointerDown: (_) => setState(() => _pointerCount++),
+      onPointerUp: (_) => setState(() => _pointerCount--),
+      onPointerCancel: (_) => setState(() => _pointerCount--),
+      child: PageView.builder(
+        // This physics combination provides the best gallery feel.
+        // It allows swiping but disables it for zooming (when pointerCount > 1 or image is zoomed).
+        physics: (_isZoomed || _pointerCount > 1)
+            ? const NeverScrollableScrollPhysics()
+            : const AlwaysScrollableScrollPhysics(),
+        controller: _pageController,
+        itemCount: _updatableFiles.length,
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+            _transformationController.value = Matrix4.identity();
+            _isZoomed = false;
+          });
 
-        // Pre-cache surrounding images for smooth swipe
-        _precacheSurrounding(index);
-      },
-      itemBuilder: (context, index) {
-        return _buildImagePage(_updatableFiles[index], index: index);
-      },
+          // Pre-cache surrounding images for smooth swipe
+          _precacheSurrounding(index);
+        },
+        itemBuilder: (context, index) {
+          return _buildImagePage(_updatableFiles[index], index: index);
+        },
+      ),
     );
   }
 
@@ -411,8 +420,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
           children: [
             _buildBottomAction(Icons.drive_file_move_outline, 'Transfer',
                 _showTransferSheet),
-            _buildBottomAction(
-                Icons.edit, 'Rename', _showRenameDialog), 
+            _buildBottomAction(Icons.edit, 'Rename', _showRenameDialog),
             _buildBottomAction(
                 Icons.delete, 'Recycle', _moveCurrentFileToRecycleBin),
             _buildFavoriteButton(currentFile),

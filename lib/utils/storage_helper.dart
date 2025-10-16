@@ -15,10 +15,10 @@ class StorageHelper {
 
   // ✨ MODIFIED: Added comments to clarify the purpose of this directory.
   /// Gets the root directory for the vault's files.
-  /// This path is in shared storage (`Android/media`), which means it will
-  /// NOT be deleted if the user uninstalls the app, ensuring data persistence.
+  /// ✨ MODIFIED: Path is now independent of the app's package name to protect against "Clear data".
+  /// This path will NOT be deleted if the user uninstalls the app OR clears the app's data.
   static Future<Directory> getVaultRootDirectory() async {
-    final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
+    final dir = Directory('/storage/emulated/0/.vlt_data');
     if (!(await dir.exists())) {
       await dir.create(recursive: true);
     }

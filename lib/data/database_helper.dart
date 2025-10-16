@@ -21,8 +21,8 @@ class DatabaseHelper {
   // ✨ ADDED: A private method to get the persistent storage directory.
   // This directory will NOT be deleted when the app is uninstalled.
   Future<Directory> _getDbDirectory() async {
-    // We choose a path that is not in the app's private data folder.
-    final dir = Directory('/storage/emulated/0/Android/media/com.vlt.app/.vlt');
+    // ✨ MODIFIED: Path is now independent of the app's package name to protect against "Clear data".
+    final dir = Directory('/storage/emulated/0/.vlt_data');
     if (!(await dir.exists())) {
       // Create the directory if it doesn't exist.
       await dir.create(recursive: true);

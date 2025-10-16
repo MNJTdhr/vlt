@@ -3,14 +3,17 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:vlt/data/notifiers.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
+import 'package:vlt/widgets/file_transfer_sheet.dart';
 
 /// ✨ A full-featured video player page with a modern, gesture-based UI.
 class VideoViewPage extends StatefulWidget {
@@ -32,6 +35,7 @@ class VideoViewPage extends StatefulWidget {
 class _VideoViewPageState extends State<VideoViewPage> {
   late VideoPlayerController _controller;
   late int _currentIndex;
+  late List<VaultFile> _updatableFiles; // ✨ ADDED: To handle local updates.
   bool _isInitialized = false;
   bool _showControls = true;
   Timer? _hideControlsTimer;
@@ -49,14 +53,18 @@ class _VideoViewPageState extends State<VideoViewPage> {
   double _currentBrightness = 0.5;
   Timer? _hideIndicatorTimer;
 
-  // ✨ ADDED: State for volume indicator
+  // State for volume indicator
   bool _showVolumeIndicator = false;
   double _currentVolume = 1.0;
 
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
+    _updatableFiles = List.from(widget.files); // ✨ ADDED
+    _currentIndex = _updatableFiles.isEmpty // ✨ MODIFIED
+        ? 0
+        : widget.initialIndex.clamp(0, _updatableFiles.length - 1);
+
     _loadLoopingPreference();
     _initializePlayer(_currentIndex);
     WakelockPlus.enable(); // Keep screen awake
@@ -97,12 +105,13 @@ class _VideoViewPageState extends State<VideoViewPage> {
       await _controller.dispose();
     }
 
-    if (index < 0 || index >= widget.files.length) {
+    // ✨ MODIFIED: Check against _updatableFiles
+    if (index < 0 || index >= _updatableFiles.length) {
       if (mounted) Navigator.of(context).pop();
       return;
     }
 
-    final vaultFile = widget.files[index];
+    final vaultFile = _updatableFiles[index]; // ✨ MODIFIED
     final folderDir = await StorageHelper.findFolderDirectoryById(
       widget.parentFolder.id,
     );
@@ -140,7 +149,8 @@ class _VideoViewPageState extends State<VideoViewPage> {
   }
 
   void _playNext() {
-    if (_currentIndex < widget.files.length - 1) {
+    // ✨ MODIFIED
+    if (_currentIndex < _updatableFiles.length - 1) {
       setState(() {
         _currentIndex++;
         _isInitialized = false;
@@ -193,7 +203,6 @@ class _VideoViewPageState extends State<VideoViewPage> {
     });
   }
 
-  // ✨ MODIFIED: Now handles showing indicators for both volume and brightness.
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isLeft = details.globalPosition.dx < screenWidth / 2;
@@ -240,6 +249,187 @@ class _VideoViewPageState extends State<VideoViewPage> {
     });
   }
 
+  // ✨ --- ADDED: ALL ACTION METHODS --- ✨
+  Future<void> _showRenameDialog() async {
+    _controller.pause();
+    final currentFile = _updatableFiles[_currentIndex];
+    final TextEditingController controller =
+        TextEditingController(text: currentFile.fileName);
+
+    final String? newName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename File'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Enter new name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final trimmedName = controller.text.trim();
+              if (trimmedName.isNotEmpty) {
+                Navigator.of(context).pop(trimmedName);
+              }
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName != currentFile.fileName) {
+      final updatedFile = currentFile.copyWith(fileName: newName);
+      setState(() {
+        _updatableFiles[_currentIndex] = updatedFile;
+      });
+      await StorageHelper.updateFileMetadata(updatedFile);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('File renamed to "$newName"')),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    final currentFile = _updatableFiles[_currentIndex];
+    final updatedFile =
+        currentFile.copyWith(isFavorite: !currentFile.isFavorite);
+    setState(() {
+      _updatableFiles[_currentIndex] = updatedFile;
+    });
+    await StorageHelper.updateFileMetadata(updatedFile);
+  }
+
+  Future<void> _showTransferSheet() async {
+    _controller.pause();
+    final currentFile = _updatableFiles[_currentIndex];
+
+    final VaultFolder? destinationFolder =
+        await showModalBottomSheet<VaultFolder>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: FileTransferSheet(sourceFolder: widget.parentFolder),
+      ),
+    );
+
+    if (destinationFolder != null && mounted) {
+      await StorageHelper.transferFile(
+          currentFile, widget.parentFolder, destinationFolder);
+      await refreshItemCounts();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('File transferred to "${destinationFolder.name}"')),
+        );
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  Future<void> _moveCurrentFileToRecycleBin() async {
+    _controller.pause();
+    final currentFile = _updatableFiles[_currentIndex];
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Move to Recycle Bin'),
+        content: Text(
+            'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Move')),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await StorageHelper.moveFileToRecycleBin(
+          currentFile, widget.parentFolder);
+      await refreshItemCounts();
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _shareCurrentFile() async {
+    _controller.pause();
+    final vaultFile = _updatableFiles[_currentIndex];
+    final folderDir =
+        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    if (folderDir == null) return;
+    final filePath = p.join(folderDir.path, vaultFile.id);
+    await Share.shareXFiles([XFile(filePath)]);
+  }
+
+  void _showInfoSheet() async {
+    _controller.pause();
+    final vaultFile = _updatableFiles[_currentIndex];
+    final folderDir =
+        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    if (folderDir == null) return;
+    final file = File(p.join(folderDir.path, vaultFile.id));
+    if (!await file.exists()) return;
+
+    final fileStat = await file.stat();
+    final fileSize = NumberFormat.compact().format(fileStat.size);
+    final dimensions =
+        '${_controller.value.size.width.toInt()} × ${_controller.value.size.height.toInt()}';
+    final dateAdded = DateFormat.yMMMd().add_jm().format(vaultFile.dateAdded);
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(vaultFile.fileName,
+                  style: Theme.of(context).textTheme.titleLarge),
+              const Divider(),
+              _infoRow('Path:', '/${widget.parentFolder.name}'),
+              _infoRow('Original Path:', vaultFile.originalPath),
+              _infoRow('File Size:', fileSize),
+              _infoRow('Dimensions:', dimensions),
+              _infoRow('Date Added:', dateAdded),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 110,
+          child:
+              Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        Expanded(
+            child: Text(value,
+                overflow: TextOverflow.ellipsis, maxLines: 3)),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -261,7 +451,7 @@ class _VideoViewPageState extends State<VideoViewPage> {
                     behavior: HitTestBehavior.translucent,
                   ),
                   _buildBrightnessIndicator(),
-                  _buildVolumeIndicator(), // ✨ ADDED: Volume indicator widget
+                  _buildVolumeIndicator(),
                   _buildOverlayControls(),
                 ],
               )
@@ -297,8 +487,7 @@ class _VideoViewPageState extends State<VideoViewPage> {
       ),
     );
   }
-  
-  // ✨ ADDED: A new widget for the volume indicator.
+
   Widget _buildVolumeIndicator() {
     IconData getVolumeIcon() {
       if (_currentVolume <= 0) {
@@ -351,7 +540,7 @@ class _VideoViewPageState extends State<VideoViewPage> {
   }
 
   Widget _buildTopBar() {
-    final currentFile = widget.files[_currentIndex];
+    final currentFile = _updatableFiles[_currentIndex];
     return Positioned(
       top: 0,
       left: 0,
@@ -395,24 +584,100 @@ class _VideoViewPageState extends State<VideoViewPage> {
                   _controller.setPlaybackSpeed(_currentSpeed);
                 },
               ),
+              // ✨ MODIFIED: Added icons to the PopupMenuButton items.
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: Colors.white),
-                onSelected: (value) async {
-                  final file = widget.files[_currentIndex];
-                  if (value == 'share') {
-                    final folderDir =
-                        await StorageHelper.findFolderDirectoryById(
-                      widget.parentFolder.id,
-                    );
-                    if (folderDir == null) return;
-                    final filePath = p.join(folderDir.path, file.id);
-                    await Share.shareXFiles([XFile(filePath)]);
+                onSelected: (value) {
+                  switch (value) {
+                    case 'transfer':
+                      _showTransferSheet();
+                      break;
+                    case 'rename':
+                      _showRenameDialog();
+                      break;
+                    case 'recycle':
+                      _moveCurrentFileToRecycleBin();
+                      break;
+                    case 'favorite':
+                      _toggleFavorite();
+                      break;
+                    case 'share':
+                      _shareCurrentFile();
+                      break;
+                    case 'details':
+                      _showInfoSheet();
+                      break;
                   }
                 },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'share', child: Text('Share')),
-                  const PopupMenuItem(value: 'details', child: Text('Details')),
-                ],
+                itemBuilder: (context) {
+                  final isFavorite = _updatableFiles[_currentIndex].isFavorite;
+                  return [
+                    PopupMenuItem(
+                      value: 'transfer',
+                      child: Row(
+                        children: const [
+                          Icon(Icons.drive_file_move_outline),
+                          SizedBox(width: 16),
+                          Text('Transfer'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'rename',
+                      child: Row(
+                        children: const [
+                          Icon(Icons.edit),
+                          SizedBox(width: 16),
+                          Text('Rename'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'recycle',
+                      child: Row(
+                        children: const [
+                          Icon(Icons.delete_outline),
+                          SizedBox(width: 16),
+                          Text('Recycle'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'favorite',
+                      child: Row(
+                        children: [
+                          Icon(isFavorite
+                              ? Icons.favorite
+                              : Icons.favorite_border),
+                          const SizedBox(width: 16),
+                          Text(isFavorite
+                              ? 'Remove from favorites'
+                              : 'Add to favorites'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'share',
+                      child: Row(
+                        children: const [
+                          Icon(Icons.share_outlined),
+                          SizedBox(width: 16),
+                          Text('Share'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'details',
+                      child: Row(
+                        children: const [
+                          Icon(Icons.info_outline),
+                          SizedBox(width: 16),
+                          Text('Details'),
+                        ],
+                      ),
+                    ),
+                  ];
+                },
               ),
             ],
           ),
@@ -448,7 +713,8 @@ class _VideoViewPageState extends State<VideoViewPage> {
                     children: [
                       Text(
                         _formatDuration(value.position),
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 12),
                       ),
                       Expanded(
                         child: VideoProgressIndicator(
@@ -467,7 +733,8 @@ class _VideoViewPageState extends State<VideoViewPage> {
                       ),
                       Text(
                         '-${_formatDuration(remaining)}',
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 12),
                       ),
                     ],
                   );

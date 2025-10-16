@@ -5,8 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart'; // ✨ ADDED: For cache directory
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:vlt/pages/photo_view_page.dart';
 import 'package:vlt/pages/video_view_page.dart';
@@ -16,6 +17,15 @@ import 'package:vlt/widgets/folder_creator_sheet.dart';
 import 'package:vlt/data/notifiers.dart';
 import 'package:vlt/utils/storage_helper.dart';
 import 'package:vlt/models/vault_folder.dart';
+
+enum SortOption {
+  dateNewest,
+  dateOldest,
+  nameAZ,
+  nameZA,
+  sizeLargest,
+  sizeSmallest,
+}
 
 class FolderViewPage extends StatefulWidget {
   final VaultFolder folder;
@@ -35,6 +45,9 @@ class _FolderViewPageState extends State<FolderViewPage>
   late AnimationController _loadingController;
   bool isFabMenuOpen = false;
   bool _isLoading = true;
+
+  // State to manage the current sort order.
+  SortOption _currentSortOption = SortOption.dateNewest;
 
   // State for selection mode
   bool _isSelectionMode = false;
@@ -61,7 +74,12 @@ class _FolderViewPageState extends State<FolderViewPage>
     )..forward();
 
     foldersNotifier.addListener(_onFoldersChanged);
-    _loadAllFolderContents();
+    _initializePage();
+  }
+
+  Future<void> _initializePage() async {
+    await _loadSortPreference();
+    await _loadAllFolderContents();
   }
 
   @override
@@ -86,14 +104,80 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
+  Future<void> _loadSortPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'sort_order_${widget.folder.id}';
+    final savedIndex = prefs.getInt(key);
+    if (savedIndex != null && savedIndex < SortOption.values.length) {
+      if (mounted) {
+        setState(() {
+          _currentSortOption = SortOption.values[savedIndex];
+        });
+      }
+    }
+  }
+
+  Future<void> _saveSortPreference(SortOption option) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'sort_order_${widget.folder.id}';
+    await prefs.setInt(key, option.index);
+  }
+
+  Future<void> _applySorting() async {
+    if (_currentSortOption == SortOption.sizeLargest ||
+        _currentSortOption == SortOption.sizeSmallest) {
+      final Map<String, int> fileSizes = {};
+      for (final file in folderFiles) {
+        try {
+          final stat = await file.stat();
+          fileSizes[p.basename(file.path)] = stat.size;
+        } catch (e) {
+          fileSizes[p.basename(file.path)] = 0;
+        }
+      }
+
+      _vaultFiles.sort((a, b) {
+        final sizeA = fileSizes[a.id] ?? 0;
+        final sizeB = fileSizes[b.id] ?? 0;
+        if (_currentSortOption == SortOption.sizeLargest) {
+          return sizeB.compareTo(sizeA);
+        } else {
+          return sizeA.compareTo(sizeB);
+        }
+      });
+    } else {
+      _vaultFiles.sort((a, b) {
+        switch (_currentSortOption) {
+          case SortOption.dateNewest:
+            return b.dateAdded.compareTo(a.dateAdded);
+          case SortOption.dateOldest:
+            return a.dateAdded.compareTo(b.dateAdded);
+          case SortOption.nameAZ:
+            return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
+          case SortOption.nameZA:
+            return b.fileName.toLowerCase().compareTo(a.fileName.toLowerCase());
+          default:
+            return 0;
+        }
+      });
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _loadAllFolderContents() async {
-    final physicalFilesResult = await StorageHelper.getFolderContents(currentFolder);
-    List<VaultFile> fileMetadata = await StorageHelper.getFilesForFolder(currentFolder);
+    final physicalFilesResult =
+        await StorageHelper.getFolderContents(currentFolder);
+    List<VaultFile> fileMetadata =
+        await StorageHelper.getFilesForFolder(currentFolder);
 
     bool needsUiRefresh = false;
 
     // --- Self-Healing Logic ---
-    final physicalFileNames = physicalFilesResult.map((f) => p.basename(f.path)).toSet();
+    final physicalFileNames =
+        physicalFilesResult.map((f) => p.basename(f.path)).toSet();
     final metadataFileIds = fileMetadata.map((mf) => mf.id).toSet();
 
     // 1. Find orphan files
@@ -133,6 +217,8 @@ class _FolderViewPageState extends State<FolderViewPage>
         _vaultFiles = fileMetadata;
         _isLoading = false;
       });
+      // Apply initial sort after loading.
+      await _applySorting();
     }
   }
 
@@ -151,17 +237,14 @@ class _FolderViewPageState extends State<FolderViewPage>
     bool permissionGranted = false;
 
     if (type == FileType.image) {
-      permissionGranted =
-          await Permission.photos.request().isGranted ||
+      permissionGranted = await Permission.photos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else if (type == FileType.video) {
-      permissionGranted =
-          await Permission.videos.request().isGranted ||
+      permissionGranted = await Permission.videos.request().isGranted ||
           await Permission.storage.request().isGranted;
     } else {
-      permissionGranted = await Permission.manageExternalStorage
-          .request()
-          .isGranted;
+      permissionGranted =
+          await Permission.manageExternalStorage.request().isGranted;
     }
 
     if (!permissionGranted) {
@@ -321,16 +404,22 @@ class _FolderViewPageState extends State<FolderViewPage>
         localPos.dx <= renderBox.size.width &&
         localPos.dy >= 0 &&
         localPos.dy <= renderBox.size.height) {
-      final itemWidth = (renderBox.size.width - (crossAxisSpacing * (crossAxisCount - 1))) / crossAxisCount;
+      final itemWidth =
+          (renderBox.size.width - (crossAxisSpacing * (crossAxisCount - 1))) /
+              crossAxisCount;
       final itemHeight = itemWidth / childAspectRatio;
 
-      final col = (localPos.dx / (itemWidth + crossAxisSpacing)).floor().clamp(0, crossAxisCount - 1);
+      final col = (localPos.dx / (itemWidth + crossAxisSpacing))
+          .floor()
+          .clamp(0, crossAxisCount - 1);
       final row = (localPos.dy / (itemHeight + mainAxisSpacing)).floor();
 
       final index = (row * crossAxisCount) + col;
       final globalIndex = baseIndex + index;
 
-      if (index >= 0 && index < items.length && globalIndex != _lastDraggedIndex) {
+      if (index >= 0 &&
+          index < items.length &&
+          globalIndex != _lastDraggedIndex) {
         final item = items[index];
         final itemId = item.id as String;
 
@@ -342,6 +431,53 @@ class _FolderViewPageState extends State<FolderViewPage>
         _lastDraggedIndex = globalIndex;
       }
     }
+  }
+
+  // ✨ MODIFIED: Centralized logic to navigate to the correct media viewer with the unified playlist.
+  Future<void> _navigateToMediaViewer({required VaultFile tappedFile}) async {
+    final bool isImage = _isImage(tappedFile.id);
+
+    // Get all media of the correct type and split them into two sorted lists.
+    final allMediaOfType = _vaultFiles.where((f) {
+      return isImage ? _isImage(f.id) : _isVideo(f.id);
+    }).toList();
+    final favoriteMedia = allMediaOfType.where((f) => f.isFavorite).toList();
+    final otherMedia = allMediaOfType.where((f) => !f.isFavorite).toList();
+
+    // The playlist is ALWAYS the same: favorites first, then others.
+    final List<VaultFile> playlist = [...favoriteMedia, ...otherMedia];
+
+    // The initial index is just the position of the tapped file in this combined list.
+    final int initialIndex = playlist.indexWhere((f) => f.id == tappedFile.id);
+
+    if (initialIndex == -1 || !mounted) return;
+
+    if (isImage) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PhotoViewPage(
+            files: playlist,
+            initialIndex: initialIndex,
+            parentFolder: currentFolder,
+          ),
+        ),
+      );
+    } else { // It's a video
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VideoViewPage(
+            files: playlist,
+            initialIndex: initialIndex,
+            parentFolder: currentFolder,
+          ),
+        ),
+      );
+    }
+
+    // Refresh content after returning from the viewer in case of changes
+    await _loadAllFolderContents();
   }
 
   @override
@@ -361,7 +497,8 @@ class _FolderViewPageState extends State<FolderViewPage>
         return true; // Allow popping the route
       },
       child: Scaffold(
-        appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
+        appBar:
+            _isSelectionMode ? _buildSelectionAppBar() : _buildNormalAppBar(),
         body: _isLoading
             ? _buildLoadingIndicator()
             : GestureDetector(
@@ -373,7 +510,8 @@ class _FolderViewPageState extends State<FolderViewPage>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.folder_open, size: 64, color: currentFolder.color),
+                            Icon(Icons.folder_open,
+                                size: 64, color: currentFolder.color),
                             const SizedBox(height: 16),
                             Text(
                               'The "${currentFolder.name}" folder is empty.',
@@ -391,16 +529,23 @@ class _FolderViewPageState extends State<FolderViewPage>
                         physics: const BouncingScrollPhysics(
                             parent: AlwaysScrollableScrollPhysics()),
                         slivers: [
-                          if (subfolders.isNotEmpty) _buildFolderGrid(subfolders, _folderGridKey),
-                          if (subfolders.isNotEmpty && (favoriteFiles.isNotEmpty || otherFiles.isNotEmpty))
+                          if (subfolders.isNotEmpty)
+                            _buildFolderGrid(subfolders, _folderGridKey),
+                          if (subfolders.isNotEmpty &&
+                              (favoriteFiles.isNotEmpty ||
+                                  otherFiles.isNotEmpty))
                             _buildDivider(),
                           if (favoriteFiles.isNotEmpty)
-                            _buildFileGrid(favoriteFiles, _vaultFiles, subfolders.isEmpty, _favoriteFileGridKey),
-                          if (favoriteFiles.isNotEmpty && otherFiles.isNotEmpty)
+                            _buildFileGrid(favoriteFiles,
+                                subfolders.isEmpty, _favoriteFileGridKey),
+                          if (favoriteFiles.isNotEmpty &&
+                              otherFiles.isNotEmpty)
                             _buildDivider(),
                           if (otherFiles.isNotEmpty)
                             _buildFileGrid(
-                                otherFiles, _vaultFiles, subfolders.isEmpty && favoriteFiles.isEmpty, _otherFileGridKey),
+                                otherFiles,
+                                subfolders.isEmpty && favoriteFiles.isEmpty,
+                                _otherFileGridKey),
                         ],
                       ),
               ),
@@ -426,8 +571,10 @@ class _FolderViewPageState extends State<FolderViewPage>
                 child: CircularProgressIndicator(
                   value: _loadingController.value,
                   strokeWidth: 5,
-                  backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
-                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.primary),
                 ),
               ),
               const SizedBox(height: 20),
@@ -497,7 +644,9 @@ class _FolderViewPageState extends State<FolderViewPage>
     );
   }
 
-  Widget _buildFileGrid(List<VaultFile> files, List<VaultFile> allFiles, bool addTopPadding, GlobalKey gridKey) {
+  // ✨ MODIFIED: Simplified the onTap logic to use the new helper function.
+  Widget _buildFileGrid(
+      List<VaultFile> files, bool addTopPadding, GlobalKey gridKey) {
     return SliverPadding(
       padding: EdgeInsets.fromLTRB(8.0, addTopPadding ? 16.0 : 0.0, 8.0, 8.0),
       sliver: SliverGrid(
@@ -525,39 +674,8 @@ class _FolderViewPageState extends State<FolderViewPage>
               onTap: () async {
                 if (_isSelectionMode) {
                   _toggleItemSelection(vaultFile.id);
-                } else if (_isImage(vaultFile.id)) {
-                  final allImages = _vaultFiles.where((f) => _isImage(f.id)).toList();
-                  final initialIndex = allImages.indexWhere((f) => f.id == vaultFile.id);
-
-                  if (initialIndex != -1) {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PhotoViewPage(
-                          files: allImages,
-                          initialIndex: initialIndex,
-                          parentFolder: currentFolder,
-                        ),
-                      ),
-                    );
-                    await _loadAllFolderContents();
-                  }
-                } else if (_isVideo(vaultFile.id)) {
-                  final allVideos = _vaultFiles.where((f) => _isVideo(f.id)).toList();
-                  final initialIndex = allVideos.indexWhere((f) => f.id == vaultFile.id);
-                  if (initialIndex != -1) {
-                     await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => VideoViewPage(
-                          files: allVideos,
-                          initialIndex: initialIndex,
-                          parentFolder: currentFolder,
-                        ),
-                      ),
-                    );
-                    await _loadAllFolderContents();
-                  }
+                } else {
+                  await _navigateToMediaViewer(tappedFile: vaultFile);
                 }
               },
               onLongPress: () {
@@ -570,7 +688,7 @@ class _FolderViewPageState extends State<FolderViewPage>
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: _buildThumbnail(physicalFile, vaultFile.id), // ✨ MODIFIED: Pass fileId for caching
+                    child: _buildThumbnail(physicalFile, vaultFile.id),
                   ),
                   if (_isSelectionMode) _buildSelectionOverlay(isSelected),
                 ],
@@ -601,10 +719,24 @@ class _FolderViewPageState extends State<FolderViewPage>
       foregroundColor: Colors.white,
       actions: [
         if (!_getSubfolders().isEmpty || !_vaultFiles.isEmpty)
-          IconButton(
-            icon: const Icon(Icons.check_box_outlined),
-            tooltip: 'Select Items',
-            onPressed: () => setState(() => _isSelectionMode = true),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'select') {
+                setState(() => _isSelectionMode = true);
+              } else if (value == 'sort') {
+                _showSortOptionsSheet();
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'select',
+                child: Text('Select items'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'sort',
+                child: Text('Sort by...'),
+              ),
+            ],
           ),
       ],
     );
@@ -694,8 +826,8 @@ class _FolderViewPageState extends State<FolderViewPage>
   }
 
   // --- Placeholder and Action Methods for Bottom Bar ---
-  void _unhidePlaceholder() => ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Unhide coming soon!')));
+  void _unhidePlaceholder() => ScaffoldMessenger.of(context)
+      .showSnackBar(const SnackBar(content: Text('Unhide coming soon!')));
   void _sharePlaceholder() => ScaffoldMessenger.of(context)
       .showSnackBar(const SnackBar(content: Text('Share coming soon!')));
 
@@ -715,7 +847,7 @@ class _FolderViewPageState extends State<FolderViewPage>
       }
       return;
     }
-    
+
     final firstFile = _vaultFiles.firstWhere(
       (f) => f.id == _selectedItemIds.first,
     );
@@ -724,17 +856,20 @@ class _FolderViewPageState extends State<FolderViewPage>
     for (final id in _selectedItemIds) {
       final fileToUpdate = _vaultFiles.firstWhere((f) => f.id == id);
       if (fileToUpdate.isFavorite != markAsFavorite) {
-         final updatedFile = fileToUpdate.copyWith(isFavorite: markAsFavorite);
-         await StorageHelper.updateFileMetadata(updatedFile);
+        final updatedFile = fileToUpdate.copyWith(isFavorite: markAsFavorite);
+        await StorageHelper.updateFileMetadata(updatedFile);
       }
     }
-    
+
     if (mounted) {
-       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(markAsFavorite ? 'Added to favorites.' : 'Removed from favorites.')),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(markAsFavorite
+                ? 'Added to favorites.'
+                : 'Removed from favorites.')),
       );
     }
-    
+
     _toggleSelectionMode();
     await _loadAllFolderContents();
   }
@@ -749,8 +884,8 @@ class _FolderViewPageState extends State<FolderViewPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content:
-                  Text('Folders cannot be transferred. Please select only files.')),
+              content: Text(
+                  'Folders cannot be transferred. Please select only files.')),
         );
       }
       return;
@@ -902,43 +1037,139 @@ class _FolderViewPageState extends State<FolderViewPage>
     }
   }
 
+  void _showSortOptionsSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return SafeArea(
+              child: Wrap(
+                children: <Widget>[
+                  ListTile(
+                    title: Text(
+                      'Sort by',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Date added (Newest first)'),
+                    value: SortOption.dateNewest,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Date added (Oldest first)'),
+                    value: SortOption.dateOldest,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Name (A-Z)'),
+                    value: SortOption.nameAZ,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Name (Z-A)'),
+                    value: SortOption.nameZA,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Size (Largest first)'),
+                    value: SortOption.sizeLargest,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  RadioListTile<SortOption>(
+                    title: const Text('Size (Smallest first)'),
+                    value: SortOption.sizeSmallest,
+                    groupValue: _currentSortOption,
+                    onChanged: (SortOption? value) async {
+                      if (value != null) {
+                        setModalState(() => _currentSortOption = value);
+                        await _saveSortPreference(value);
+                        await _applySorting();
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   // --- Thumbnail helpers ---
 
-  // ✨ REWRITTEN: This function now implements caching for fast loading.
-  Future<Uint8List?> _generateVideoThumbnail(String videoPath, String fileId) async {
-    // 1. Define the path for the cached thumbnail image.
+  Future<Uint8List?> _generateVideoThumbnail(
+      String videoPath, String fileId) async {
     final tempDir = await getTemporaryDirectory();
     final cacheFile = File(p.join(tempDir.path, 'thumbnails', '$fileId.jpg'));
 
-    // 2. If a cached thumbnail already exists, use it instantly.
     if (await cacheFile.exists()) {
       return await cacheFile.readAsBytes();
     }
 
-    // 3. If not, generate a new one, save it to the cache, then return it.
     try {
       final thumbnailBytes = await VideoThumbnail.thumbnailData(
         video: videoPath,
         imageFormat: ImageFormat.JPEG,
-        timeMs: 2000, // ✨ Take frame from the 2-second mark
-        maxWidth: 200, // Keep the generated image small for performance
+        timeMs: 2000,
+        maxWidth: 200,
         quality: 50,
       );
 
       if (thumbnailBytes != null) {
-        // Ensure the cache directory exists
         await cacheFile.parent.create(recursive: true);
-        // Save the generated thumbnail for next time
         await cacheFile.writeAsBytes(thumbnailBytes);
         return thumbnailBytes;
       }
     } catch (e) {
       debugPrint('Failed to generate or cache thumbnail for $videoPath: $e');
     }
-    return null; // Return null if generation fails
+    return null;
   }
-  
-  // ✨ MODIFIED: Now takes fileId to enable caching.
+
   Widget _buildThumbnail(File file, String fileId) {
     final path = file.path;
     if (_isImage(path)) {
@@ -949,9 +1180,11 @@ class _FolderViewPageState extends State<FolderViewPage>
       );
     } else if (_isVideo(path)) {
       return FutureBuilder<Uint8List?>(
-        future: _generateVideoThumbnail(path, fileId), // ✨ Use new caching function
+        future: _generateVideoThumbnail(path, fileId),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done && snapshot.hasData && snapshot.data != null) {
+          if (snapshot.connectionState == ConnectionState.done &&
+              snapshot.hasData &&
+              snapshot.data != null) {
             return Stack(
               fit: StackFit.expand,
               children: [
@@ -960,11 +1193,12 @@ class _FolderViewPageState extends State<FolderViewPage>
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
                 ),
-                const Center(child: Icon(Icons.play_circle, color: Colors.white70, size: 36)),
+                const Center(
+                    child: Icon(Icons.play_circle,
+                        color: Colors.white70, size: 36)),
               ],
             );
           }
-          // Show a placeholder with a progress indicator while loading.
           return Container(
             color: Colors.black12,
             child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
