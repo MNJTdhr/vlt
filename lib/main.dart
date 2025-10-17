@@ -40,7 +40,7 @@ void main() async {
   // ✨ STEP 2: Ensure counts are up to date.
   await refreshItemCounts();
 
-  // ✨ ADDED: Load the saved theme preference on startup.
+  // ✨ MODIFIED: Load both saved theme preferences on startup.
   await loadThemePreference();
 
   runApp(const VaultApp());
@@ -61,20 +61,27 @@ class VaultApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: selectedThemeNotifier,
-      builder: (context, isDarkMode, child) {
-        return MaterialApp(
-          title: 'Vault App',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.blue,
-              brightness: isDarkMode ? Brightness.dark : Brightness.light,
-            ),
-          ),
-          home: const MainScreen(),
+    // ✨ MODIFIED: Nest builders to listen to both theme color and dark mode.
+    return ValueListenableBuilder<Color>(
+      valueListenable: selectedColorNotifier,
+      builder: (context, color, child) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: selectedThemeNotifier,
+          builder: (context, isDarkMode, child) {
+            return MaterialApp(
+              title: 'Vault App',
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(
+                useMaterial3: true,
+                // ✨ MODIFIED: Theme now uses the dynamic color and brightness.
+                colorScheme: ColorScheme.fromSeed(
+                  seedColor: color,
+                  brightness: isDarkMode ? Brightness.dark : Brightness.light,
+                ),
+              ),
+              home: const MainScreen(),
+            );
+          },
         );
       },
     );
@@ -112,9 +119,12 @@ class MainScreen extends StatelessWidget {
                 valueListenable: selectedThemeNotifier,
                 builder: (context, isDarkMode, child) {
                   return IconButton(
-                    // ✨ MODIFIED: This now calls a function to save the theme preference.
+                    // ✨ MODIFIED: This now calls the new save function to toggle theme.
                     onPressed: () {
-                      toggleThemePreference();
+                      saveThemePreference(
+                        isDarkMode: !isDarkMode,
+                        color: selectedColorNotifier.value,
+                      );
                     },
                     icon: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 300),
@@ -155,6 +165,7 @@ class MainScreen extends StatelessWidget {
                     selectedIcon: Icon(Icons.explore),
                     label: 'Browser',
                   ),
+
                   NavigationDestination(
                     icon: Icon(Icons.settings_outlined),
                     selectedIcon: Icon(Icons.settings),

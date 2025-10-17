@@ -119,7 +119,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
     // Precache current and neighbors after first frame so context is valid for precacheImage
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _precacheSurrounding(_currentIndex);
+      if (mounted) {
+        _precacheSurrounding(_currentIndex);
+      }
     });
   }
 
@@ -132,7 +134,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   Future<void> _precacheImage(int index) async {
-    if (index < 0 || index >= _updatableFiles.length) return;
+    if (!mounted || index < 0 || index >= _updatableFiles.length) return;
     if (!_folderReady || _parentFolderDir == null) return;
 
     final vaultFile = _updatableFiles[index];
@@ -519,13 +521,22 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     });
   }
 
+  // ✨ MODIFIED: This function now reliably stops the slideshow on the current image.
   void _stopSlideshow() {
     _slideshowTimer?.cancel();
     if (mounted && _isSlideshowActive) {
+      // First, set the state to switch the UI from slideshow view to the interactive PageView.
       setState(() {
         _isSlideshowActive = false;
         _showUI = true;
-        _pageController.jumpToPage(_currentIndex);
+      });
+
+      // After the UI has rebuilt in the next frame, command the PageController to jump.
+      // This prevents a race condition where the controller is asked to jump before the PageView is on screen.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) {
+          _pageController.jumpToPage(_currentIndex);
+        }
       });
     }
   }
@@ -568,7 +579,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       },
     );
 
-    if (newName != null && newName != currentFile.fileName) {
+    if (newName != null && newName != currentFile.fileName && mounted) {
       final updatedFile = currentFile.copyWith(fileName: newName);
 
       // Update state locally for instant UI change
@@ -685,6 +696,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     final dateAdded = DateFormat.yMMMd().add_jm().format(vaultFile.dateAdded);
 
     // Show the sheet without waiting for dimensions
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

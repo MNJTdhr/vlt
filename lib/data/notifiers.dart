@@ -1,6 +1,6 @@
 // lib/data/notifiers.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // ✨ ADDED: To save theme preference
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 
@@ -8,25 +8,36 @@ import 'package:vlt/utils/storage_helper.dart';
 /// --- NOTIFIERS ---
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
 ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
+// ✨ ADDED: Notifier for the primary theme color.
+ValueNotifier<Color> selectedColorNotifier = ValueNotifier(Colors.blue);
 ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
 
 
 /// --- THEME HELPERS ---
 
-// ✨ ADDED: Loads the saved theme preference from disk.
+// ✨ MODIFIED: Loads both theme mode and color preference from disk.
 Future<void> loadThemePreference() async {
   final prefs = await SharedPreferences.getInstance();
-  // Reads the 'isDarkMode' boolean. If it doesn't exist, it defaults to false (light mode).
+  // Reads the 'isDarkMode' boolean. Defaults to false (light mode).
   selectedThemeNotifier.value = prefs.getBool('isDarkMode') ?? false;
+
+  // Reads the 'themeColor' integer. Defaults to blue.
+  final colorValue = prefs.getInt('themeColor') ?? Colors.blue.value;
+  selectedColorNotifier.value = Color(colorValue);
 }
 
-// ✨ ADDED: Toggles the theme and saves the new preference.
-Future<void> toggleThemePreference() async {
+// ✨ ADDED: Saves the theme preferences to disk and updates the notifiers.
+// This replaces the old toggleThemePreference function.
+Future<void> saveThemePreference({required bool isDarkMode, required Color color}) async {
   final prefs = await SharedPreferences.getInstance();
-  // Invert the current theme value.
-  selectedThemeNotifier.value = !selectedThemeNotifier.value;
-  // Save the new value to the device.
-  await prefs.setBool('isDarkMode', selectedThemeNotifier.value);
+
+  // Update the global notifiers to trigger UI rebuilds.
+  selectedThemeNotifier.value = isDarkMode;
+  selectedColorNotifier.value = color;
+
+  // Save the new values to the device.
+  await prefs.setBool('isDarkMode', isDarkMode);
+  await prefs.setInt('themeColor', color.value);
 }
 
 

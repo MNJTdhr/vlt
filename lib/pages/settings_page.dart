@@ -1,8 +1,9 @@
 // lib/pages/settings_page.dart
 import 'package:flutter/material.dart';
 import '../utils/storage_helper.dart'; // ✅ Needed for rebuild function
-import '../data/notifiers.dart';       // ✅ To refresh UI after rebuild
+import '../data/notifiers.dart';     // ✅ To refresh UI after rebuild
 import 'recycle_bin_page.dart';        // ✨ Recycle bin import
+import 'theme_settings_page.dart';     // ✨ ADDED: Import for the new theme page
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -54,7 +55,7 @@ class SettingsPage extends StatelessWidget {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Rebuilding database... Please wait.')),
@@ -62,6 +63,7 @@ class SettingsPage extends StatelessWidget {
 
     try {
       await StorageHelper.rebuildDatabaseFromDisk();
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('✅ Database successfully rebuilt and refreshed!'),
@@ -69,6 +71,7 @@ class SettingsPage extends StatelessWidget {
         ),
       );
     } catch (e) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('❌ Failed to rebuild database: $e'),
@@ -114,7 +117,13 @@ class SettingsPage extends StatelessWidget {
           context: context,
           icon: Icons.brightness_6,
           label: 'Change Theme',
-          onTap: () => _showComingSoon(context, 'Change Theme'),
+          // ✨ MODIFIED: Navigate to the new ThemeSettingsPage.
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ThemeSettingsPage()),
+            );
+          },
         ),
 
         // 🎭 Icon Disguise
