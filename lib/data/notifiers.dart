@@ -4,6 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 
+// ✨ ADDED: Enum to define the available sort options for the home page.
+enum HomeSortOption {
+  dateNewest,
+  dateOldest,
+  nameAZ,
+  nameZA,
+}
 
 /// --- NOTIFIERS ---
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
@@ -11,7 +18,9 @@ ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
 // ✨ ADDED: Notifier for the primary theme color.
 ValueNotifier<Color> selectedColorNotifier = ValueNotifier(Colors.blue);
 ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
-
+// ✨ ADDED: Notifier to hold the current sort order for the home page folders.
+ValueNotifier<HomeSortOption> homeSortNotifier =
+    ValueNotifier(HomeSortOption.dateNewest);
 
 /// --- THEME HELPERS ---
 
@@ -28,7 +37,8 @@ Future<void> loadThemePreference() async {
 
 // ✨ ADDED: Saves the theme preferences to disk and updates the notifiers.
 // This replaces the old toggleThemePreference function.
-Future<void> saveThemePreference({required bool isDarkMode, required Color color}) async {
+Future<void> saveThemePreference(
+    {required bool isDarkMode, required Color color}) async {
   final prefs = await SharedPreferences.getInstance();
 
   // Update the global notifiers to trigger UI rebuilds.
@@ -40,6 +50,23 @@ Future<void> saveThemePreference({required bool isDarkMode, required Color color
   await prefs.setInt('themeColor', color.value);
 }
 
+/// --- SORTING HELPERS ---
+
+// ✨ ADDED: Loads the saved home page sort preference from disk.
+Future<void> loadHomeSortPreference() async {
+  final prefs = await SharedPreferences.getInstance();
+  final savedIndex = prefs.getInt('homeSortOrder');
+  if (savedIndex != null && savedIndex < HomeSortOption.values.length) {
+    homeSortNotifier.value = HomeSortOption.values[savedIndex];
+  }
+}
+
+// ✨ ADDED: Saves the selected home page sort preference to disk.
+Future<void> saveHomeSortPreference(HomeSortOption option) async {
+  final prefs = await SharedPreferences.getInstance();
+  homeSortNotifier.value = option;
+  await prefs.setInt('homeSortOrder', option.index);
+}
 
 /// --- FOLDER DATA HELPERS ---
 
@@ -88,12 +115,12 @@ List<VaultFolder> getDefaultFolders() {
 /// ✨ MODIFIED: Central function to refresh all item counts using efficient database queries.
 Future<void> refreshItemCounts() async {
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-  
+
   for (final folder in currentFolders) {
     // Get counts directly from the database, which is much faster.
     final fileCount = await StorageHelper.getFileCount(folder.id);
     final subfolderCount = await StorageHelper.getSubfolderCount(folder.id);
-    
+
     // Update the item count on the existing folder object.
     folder.itemCount = subfolderCount + fileCount;
   }
@@ -102,7 +129,6 @@ Future<void> refreshItemCounts() async {
   // Creating a new list from the modified one to ensure the ValueNotifier detects the change.
   foldersNotifier.value = List<VaultFolder>.from(currentFolders);
 }
-
 
 /// --- CONSTANTS FOR UI OPTIONS ---
 

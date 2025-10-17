@@ -42,6 +42,8 @@ void main() async {
 
   // ✨ MODIFIED: Load both saved theme preferences on startup.
   await loadThemePreference();
+  // ✨ ADDED: Load saved sort preference on startup.
+  await loadHomeSortPreference();
 
   runApp(const VaultApp());
 }
@@ -112,34 +114,113 @@ class MainScreen extends StatelessWidget {
               ),
             ),
             centerTitle: true,
-            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            backgroundColor: selectedColorNotifier.value,
+            foregroundColor: Colors.white,
             elevation: 2,
             actions: [
+              // ✨ MODIFIED: Nested the builders to listen to both notifiers.
               ValueListenableBuilder(
-                valueListenable: selectedThemeNotifier,
-                builder: (context, isDarkMode, child) {
-                  return IconButton(
-                    // ✨ MODIFIED: This now calls the new save function to toggle theme.
-                    onPressed: () {
-                      saveThemePreference(
-                        isDarkMode: !isDarkMode,
-                        color: selectedColorNotifier.value,
+                valueListenable: homeSortNotifier,
+                builder: (context, sortValue, child) {
+                  // This inner builder ensures the menu rebuilds when the theme changes.
+                  return ValueListenableBuilder(
+                    valueListenable: selectedThemeNotifier,
+                    builder: (context, isDarkMode, child) {
+                      return PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) {
+                          if (value == 'toggle_theme') {
+                            saveThemePreference(
+                              isDarkMode: !isDarkMode,
+                              color: selectedColorNotifier.value,
+                            );
+                          } else if (value.startsWith('sort_')) {
+                            // This part remains the same.
+                            final optionName = value.replaceFirst('sort_', '');
+                            final option = HomeSortOption.values.firstWhere(
+                                (e) => e.name == optionName);
+                            saveHomeSortPreference(option);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          // --- Theme Toggle Option ---
+                          PopupMenuItem<String>(
+                            value: 'toggle_theme',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isDarkMode
+                                      ? Icons.light_mode_outlined
+                                      : Icons.dark_mode_outlined,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(isDarkMode
+                                    ? 'Switch to Light Mode'
+                                    : 'Switch to Dark Mode'),
+                              ],
+                            ),
+                          ),
+                          // --- Sort Sub-menu ---
+                          PopupMenuItem<String>(
+                            padding: EdgeInsets.zero,
+                            child: PopupMenuButton<String>(
+                              tooltip: 'Sort folders',
+                              child: const Padding(
+                                padding: EdgeInsets.only(
+                                    left: 16.0,
+                                    right: 8.0,
+                                    top: 12.0,
+                                    bottom: 12.0),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.sort),
+                                    SizedBox(width: 12),
+                                    Text('Sort by'),
+                                    Spacer(),
+                                    Icon(Icons.arrow_right),
+                                  ],
+                                ),
+                              ),
+                              onSelected: (value) {
+                                final optionName =
+                                    value.replaceFirst('sort_', '');
+                                final option = HomeSortOption.values
+                                    .firstWhere((e) => e.name == optionName);
+                                saveHomeSortPreference(option);
+                              },
+                              itemBuilder: (context) => [
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_dateNewest',
+                                  checked:
+                                      sortValue == HomeSortOption.dateNewest,
+                                  child: const Text('Newest first'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_dateOldest',
+                                  checked:
+                                      sortValue == HomeSortOption.dateOldest,
+                                  child: const Text('Oldest first'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_nameAZ',
+                                  checked: sortValue == HomeSortOption.nameAZ,
+                                  child: const Text('Name (A-Z)'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_nameZA',
+                                  checked: sortValue == HomeSortOption.nameZA,
+                                  child: const Text('Name (Z-A)'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       );
                     },
-                    icon: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: Icon(
-                        isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                        key: ValueKey(isDarkMode),
-                      ),
-                    ),
-                    tooltip: isDarkMode
-                        ? 'Switch to Light Mode'
-                        : 'Switch to Dark Mode',
                   );
                 },
               ),
-              const SizedBox(width: 10),
             ],
           ),
           body: IndexedStack(
@@ -165,7 +246,6 @@ class MainScreen extends StatelessWidget {
                     selectedIcon: Icon(Icons.explore),
                     label: 'Browser',
                   ),
-
                   NavigationDestination(
                     icon: Icon(Icons.settings_outlined),
                     selectedIcon: Icon(Icons.settings),

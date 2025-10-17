@@ -94,43 +94,68 @@ class HomePage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           // Folders grid
+          // ✨ MODIFIED: Wrapped with a builder to listen for sort option changes.
           Expanded(
-            child: ValueListenableBuilder<List<VaultFolder>>(
-              valueListenable: foldersNotifier,
-              builder: (context, folders, child) {
-                final rootFolders =
-                    folders.where((f) => f.parentPath == 'root').toList();
+            child: ValueListenableBuilder<HomeSortOption>(
+              valueListenable: homeSortNotifier,
+              builder: (context, sortOption, _) {
+                return ValueListenableBuilder<List<VaultFolder>>(
+                  valueListenable: foldersNotifier,
+                  builder: (context, folders, child) {
+                    final rootFolders =
+                        folders.where((f) => f.parentPath == 'root').toList();
 
-                if (rootFolders.isEmpty) {
-                  return _buildEmptyState(context);
-                }
-                return GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 1.1,
-                  ),
-                  itemCount: rootFolders.length,
-                  itemBuilder: (context, index) {
-                    final folder = rootFolders[index];
-                    
-                    return FolderCard(
-                      folder: folder,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => FolderViewPage(folder: folder),
-                          ),
+                    // ✨ ADDED: Sorting logic based on the current sort option.
+                    rootFolders.sort((a, b) {
+                      switch (sortOption) {
+                        case HomeSortOption.dateNewest:
+                          return b.creationDate.compareTo(a.creationDate);
+                        case HomeSortOption.dateOldest:
+                          return a.creationDate.compareTo(b.creationDate);
+                        case HomeSortOption.nameAZ:
+                          return a.name
+                              .toLowerCase()
+                              .compareTo(b.name.toLowerCase());
+                        case HomeSortOption.nameZA:
+                          return b.name
+                              .toLowerCase()
+                              .compareTo(a.name.toLowerCase());
+                      }
+                    });
+
+                    if (rootFolders.isEmpty) {
+                      return _buildEmptyState(context);
+                    }
+                    return GridView.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                        childAspectRatio: 1.1,
+                      ),
+                      itemCount: rootFolders.length,
+                      itemBuilder: (context, index) {
+                        final folder = rootFolders[index];
+
+                        return FolderCard(
+                          folder: folder,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FolderViewPage(folder: folder),
+                              ),
+                            );
+                          },
+                          onRename: (folder, newName) {
+                            _renameFolder(context, folder, newName);
+                          },
+                          onDelete: (f) => _deleteFolder(context, f),
+                          onCustomize: (folder, icon, color) {
+                            _customizeFolder(context, folder, icon, color);
+                          },
                         );
-                      },
-                      onRename: (folder, newName) {
-                        _renameFolder(context, folder, newName);
-                      },
-                      onDelete: (f) => _deleteFolder(context, f),
-                      onCustomize: (folder, icon, color) {
-                        _customizeFolder(context, folder, icon, color);
                       },
                     );
                   },
@@ -157,14 +182,16 @@ class HomePage extends StatelessWidget {
           Text(
             'No folders yet',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                 ),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap the + button to create your first folder',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
                 ),
             textAlign: TextAlign.center,
           ),
@@ -205,12 +232,13 @@ void _deleteFolder(BuildContext context, VaultFolder folder) async {
   // Find all children recursively to remove from the notifier list in one go.
   final List<String> idsToDelete = [folder.id];
   void findChildren(String parentId) {
-      final children = currentFolders.where((f) => f.parentPath == parentId);
-      for (final child in children) {
-          idsToDelete.add(child.id);
-          findChildren(child.id);
-      }
+    final children = currentFolders.where((f) => f.parentPath == parentId);
+    for (final child in children) {
+      idsToDelete.add(child.id);
+      findChildren(child.id);
+    }
   }
+
   findChildren(folder.id);
 
   currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
