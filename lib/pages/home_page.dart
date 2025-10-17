@@ -1,5 +1,6 @@
 // lib/pages/home_page.dart
 import 'package:flutter/material.dart';
+import 'package:reorderable_grid_view/reorderable_grid_view.dart';
 import 'package:vlt/widgets/folder_card.dart';
 import '../data/notifiers.dart';
 import 'package:vlt/pages/folder_view_page.dart';
@@ -18,50 +19,50 @@ class HomePage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Welcome section
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                  Theme.of(context).colorScheme.secondary.withOpacity(0.1),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.security,
-                  size: 32,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Secure Vault',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Your private files are safe and encrypted',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color:
-                            Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
+          // Container(
+          //   width: double.infinity,
+          //   padding: const EdgeInsets.all(20),
+          //   decoration: BoxDecoration(
+          //     gradient: LinearGradient(
+          //       colors: [
+          //         Theme.of(context).colorScheme.primary.withOpacity(0.1),
+          //         Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+          //       ],
+          //       begin: Alignment.topLeft,
+          //       end: Alignment.bottomRight,
+          //     ),
+          //     borderRadius: BorderRadius.circular(16),
+          //     border: Border.all(
+          //       color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          //     ),
+          //   ),
+          //   child: Column(
+          //     crossAxisAlignment: CrossAxisAlignment.start,
+          //     children: [
+          //       Icon(
+          //         Icons.security,
+          //         size: 32,
+          //         color: Theme.of(context).colorScheme.primary,
+          //       ),
+          //       const SizedBox(height: 8),
+          //       Text(
+          //         'Secure Vault',
+          //         style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          //               fontWeight: FontWeight.bold,
+          //             ),
+          //       ),
+          //       const SizedBox(height: 4),
+          //       Text(
+          //         'Your private files are safe and encrypted',
+          //         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          //               color:
+          //                   Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+          //             ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
+          // const SizedBox(height: 24),
           // Folders section header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -94,7 +95,6 @@ class HomePage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           // Folders grid
-          // ✨ MODIFIED: Wrapped with a builder to listen for sort option changes.
           Expanded(
             child: ValueListenableBuilder<HomeSortOption>(
               valueListenable: homeSortNotifier,
@@ -105,9 +105,11 @@ class HomePage extends StatelessWidget {
                     final rootFolders =
                         folders.where((f) => f.parentPath == 'root').toList();
 
-                    // ✨ ADDED: Sorting logic based on the current sort option.
+                    // ✨ MODIFIED: Sorting logic now includes the 'manual' option.
                     rootFolders.sort((a, b) {
                       switch (sortOption) {
+                        case HomeSortOption.manual:
+                          return a.sortOrder.compareTo(b.sortOrder);
                         case HomeSortOption.dateNewest:
                           return b.creationDate.compareTo(a.creationDate);
                         case HomeSortOption.dateOldest:
@@ -126,38 +128,78 @@ class HomePage extends StatelessWidget {
                     if (rootFolders.isEmpty) {
                       return _buildEmptyState(context);
                     }
-                    return GridView.builder(
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 16,
-                        mainAxisSpacing: 16,
-                        childAspectRatio: 1.1,
-                      ),
-                      itemCount: rootFolders.length,
-                      itemBuilder: (context, index) {
-                        final folder = rootFolders[index];
 
-                        return FolderCard(
-                          folder: folder,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => FolderViewPage(folder: folder),
-                              ),
-                            );
-                          },
-                          onRename: (folder, newName) {
-                            _renameFolder(context, folder, newName);
-                          },
-                          onDelete: (f) => _deleteFolder(context, f),
-                          onCustomize: (folder, icon, color) {
-                            _customizeFolder(context, folder, icon, color);
-                          },
-                        );
-                      },
-                    );
+                    // ✨ ADDED: Conditionally return a reorderable grid or a standard one.
+                    if (sortOption == HomeSortOption.manual) {
+                      return ReorderableGridView.builder(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.1,
+                        ),
+                        itemCount: rootFolders.length,
+                        itemBuilder: (context, index) {
+                          final folder = rootFolders[index];
+                          return SizedBox(
+                            key: ValueKey(folder.id),
+                            child: FolderCard(
+                              folder: folder,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        FolderViewPage(folder: folder),
+                                  ),
+                                );
+                              },
+                              onRename: (f, newName) =>
+                                  _renameFolder(context, f, newName),
+                              onDelete: (f) => _deleteFolder(context, f),
+                              onCustomize: (f, icon, color) =>
+                                  _customizeFolder(context, f, icon, color),
+                            ),
+                          );
+                        },
+                        onReorder: (oldIndex, newIndex) {
+                          _onReorder(rootFolders, oldIndex, newIndex);
+                        },
+                      );
+                    } else {
+                      // This is the standard, non-reorderable grid.
+                      return GridView.builder(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.1,
+                        ),
+                        itemCount: rootFolders.length,
+                        itemBuilder: (context, index) {
+                          final folder = rootFolders[index];
+                          return FolderCard(
+                            folder: folder,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      FolderViewPage(folder: folder),
+                                ),
+                              );
+                            },
+                            onRename: (f, newName) =>
+                                _renameFolder(context, f, newName),
+                            onDelete: (f) => _deleteFolder(context, f),
+                            onCustomize: (f, icon, color) =>
+                                _customizeFolder(context, f, icon, color),
+                          );
+                        },
+                      );
+                    }
                   },
                 );
               },
@@ -200,6 +242,30 @@ class HomePage extends StatelessWidget {
     );
   }
 }
+
+// ✨ MODIFIED: Handles the logic for reordering folders and updates the UI instantly.
+void _onReorder(
+    List<VaultFolder> rootFolders, int oldIndex, int newIndex) async {
+  // 1. Perform the reorder in the local list.
+  final movedFolder = rootFolders.removeAt(oldIndex);
+  rootFolders.insert(newIndex, movedFolder);
+
+  // 2. Create a new list where each folder object has its 'sortOrder' property updated.
+  final List<VaultFolder> updatedRootFolders = [];
+  for (int i = 0; i < rootFolders.length; i++) {
+    updatedRootFolders.add(rootFolders[i].copyWith(sortOrder: i));
+  }
+
+  // 3. Update the database with the new correct sort order.
+  await StorageHelper.updateFolderSortOrder(updatedRootFolders);
+
+  // 4. Update the global notifier with the list that contains the updated objects.
+  final otherFolders = foldersNotifier.value
+      .where((folder) => folder.parentPath != 'root')
+      .toList();
+  foldersNotifier.value = [...updatedRootFolders, ...otherFolders];
+}
+
 
 /// Renames a folder's metadata in the database.
 void _renameFolder(

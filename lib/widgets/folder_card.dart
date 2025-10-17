@@ -8,7 +8,7 @@ class FolderCard extends StatelessWidget {
   final void Function(VaultFolder folder, String newName) onRename;
   final void Function(VaultFolder folder) onDelete;
   final void Function(VaultFolder folder, IconData icon, Color color)
-      onCustomize;
+  onCustomize;
 
   const FolderCard({
     super.key,
@@ -33,10 +33,12 @@ class FolderCard extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: Center( // ✨ FIX: Centered the column
+                child: Center(
+                  // ✨ FIX: Centered the column
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min, // ✅ Important to limit height
+                    mainAxisSize:
+                        MainAxisSize.min, // ✅ Important to limit height
                     children: [
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -49,9 +51,8 @@ class FolderCard extends StatelessWidget {
                       const SizedBox(height: 12),
                       Text(
                         folder.name,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -60,10 +61,10 @@ class FolderCard extends StatelessWidget {
                       Text(
                         '${folder.itemCount} items',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withOpacity(0.6),
-                            ),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.6),
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -141,51 +142,37 @@ class FolderCard extends StatelessWidget {
 
   void _showRenameDialog(BuildContext context) {
     final controller = TextEditingController(text: folder.name);
-    showModalBottomSheet(
+
+    void submitRename() {
+      final newName = controller.text.trim();
+      if (newName.isNotEmpty) {
+        Navigator.pop(context);
+        onRename(folder, newName);
+      }
+    }
+
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          left: 24,
-          right: 24,
-          top: 24,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename Folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'New Name'),
+          onSubmitted: (_) => submitRename(),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Rename Folder',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.drive_file_rename_outline),
-              ),
-              onSubmitted: (value) {
-                if (value.trim().isNotEmpty) {
-                  Navigator.pop(context);
-                  onRename(folder, value.trim());
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () {
-                final newName = controller.text.trim();
-                if (newName.isNotEmpty) {
-                  Navigator.pop(context);
-                  onRename(folder, newName);
-                }
-              },
-              child: const Text('Rename'),
-            ),
-          ],
-        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(onPressed: submitRename, child: const Text('Rename')),
+        ],
       ),
     );
   }
 
+  // ✨ MODIFIED: Replaced the bottom sheet with a centered AlertDialog.
   void _showCustomizeDialog(BuildContext context) {
     IconData selectedIcon = folder.icon;
     Color selectedColor = folder.color;
@@ -212,62 +199,94 @@ class FolderCard extends StatelessWidget {
       Colors.purple,
       Colors.teal,
       Colors.pink,
+      Colors.indigo,
+      Colors.amber,
+      Colors.cyan,
+      Colors.lime,
+      Colors.deepOrange,
     ];
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Wrap(
-                spacing: 10,
-                children: availableIcons.map((icon) {
-                  return IconButton(
-                    icon: Icon(
-                      icon,
-                      color: icon == selectedIcon ? selectedColor : Colors.grey,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Customize Folder'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Icon',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    onPressed: () => setSheetState(() => selectedIcon = icon),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 10,
-                children: availableColors.map((color) {
-                  final isSelected = color == selectedColor;
-                  return GestureDetector(
-                    onTap: () => setSheetState(() => selectedColor = color),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: color,
-                      child: isSelected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 16,
-                            )
-                          : null,
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: availableIcons.map((icon) {
+                        return IconButton(
+                          icon: Icon(
+                            icon,
+                            color: icon == selectedIcon
+                                ? selectedColor
+                                : Colors.grey,
+                          ),
+                          onPressed: () =>
+                              setDialogState(() => selectedIcon = icon),
+                        );
+                      }).toList(),
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Color',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: availableColors.map((color) {
+                        final isSelected = color == selectedColor;
+                        return GestureDetector(
+                          onTap: () =>
+                              setDialogState(() => selectedColor = color),
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: color,
+                            child: isSelected
+                                ? const Icon(
+                                    Icons.check,
+                                    color: Colors.white,
+                                    size: 16,
+                                  )
+                                : null,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  onCustomize(folder, selectedIcon, selectedColor);
-                },
-                child: const Text('Apply'),
-              ),
-            ],
-          ),
-        ),
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    onCustomize(folder, selectedIcon, selectedColor);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

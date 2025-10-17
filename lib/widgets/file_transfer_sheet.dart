@@ -26,6 +26,7 @@ class _FileTransferSheetState extends State<FileTransferSheet> {
       itemCount: 0,
       parentPath: '',
       creationDate: DateTime.now(),
+      sortOrder: 0, // ✨ ADDED: Fulfilled the required parameter.
     )
   ];
 

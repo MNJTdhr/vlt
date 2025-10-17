@@ -20,7 +20,10 @@ class VaultFolder {
 
   /// The date and time the folder was created.
   final DateTime creationDate;
-  
+
+  /// ✨ ADDED: The manual sort order for this folder.
+  final int sortOrder;
+
   /// Number of items in the folder (files + subfolders).
   /// This is not stored in the database and is calculated dynamically.
   int itemCount;
@@ -34,6 +37,7 @@ class VaultFolder {
     this.itemCount = 0, // ✨ MODIFIED: Now has a default value and is not final
     required this.parentPath,
     required this.creationDate,
+    required this.sortOrder, // ✨ ADDED: Manual sort order
   });
 
   /// Create a new folder based on an existing one with changes
@@ -45,6 +49,7 @@ class VaultFolder {
     int? itemCount,
     String? parentPath,
     DateTime? creationDate,
+    int? sortOrder, // ✨ ADDED
   }) {
     return VaultFolder(
       id: id ?? this.id,
@@ -54,6 +59,7 @@ class VaultFolder {
       itemCount: itemCount ?? this.itemCount,
       parentPath: parentPath ?? this.parentPath,
       creationDate: creationDate ?? this.creationDate,
+      sortOrder: sortOrder ?? this.sortOrder, // ✨ ADDED
     );
   }
 
@@ -70,6 +76,7 @@ class VaultFolder {
       'color': color.value,
       'parentPath': parentPath,
       'creationDate': creationDate.toIso8601String(),
+      'sortOrder': sortOrder, // ✨ ADDED
     };
   }
 
@@ -86,6 +93,7 @@ class VaultFolder {
       color: Color(map['color']),
       parentPath: map['parentPath'],
       creationDate: DateTime.parse(map['creationDate']),
+      sortOrder: map['sortOrder'] ?? 0, // ✨ ADDED: Read from map, default to 0.
       // itemCount is not in the map, it will be populated later.
     );
   }
@@ -113,7 +121,7 @@ class VaultFile {
 
   /// Stores the ID of the folder where the file originally lived.
   final String originalParentPath;
-  
+
   /// A flag to indicate if the file is a favorite.
   final bool isFavorite;
 

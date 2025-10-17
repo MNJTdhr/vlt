@@ -687,7 +687,7 @@ class _FolderViewPageState extends State<FolderViewPage>
                 fit: StackFit.expand,
                 children: [
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(1),
                     child: _buildThumbnail(physicalFile, vaultFile.id),
                   ),
                   if (_isSelectionMode) _buildSelectionOverlay(isSelected),

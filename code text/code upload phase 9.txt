@@ -31,7 +31,6 @@ class DatabaseHelper {
     return dir;
   }
 
-
   /// Initializes the database by opening it and creating tables if they don't exist.
   Future<Database> _initDatabase() async {
     // ✨ MODIFIED: Get the path to our new persistent directory.
@@ -42,9 +41,19 @@ class DatabaseHelper {
     // the database is created.
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // ✨ MODIFIED: Incremented version for schema change.
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade, // ✨ ADDED: Handle database schema upgrades.
     );
+  }
+
+  // ✨ ADDED: Handles migrations when the database version increases.
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add the new sortOrder column to the existing folders table.
+      await db.execute(
+          'ALTER TABLE folders ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   /// SQL commands to create the initial tables.
@@ -59,7 +68,8 @@ class DatabaseHelper {
         iconFontPackage TEXT,
         color INTEGER NOT NULL,
         parentPath TEXT NOT NULL,
-        creationDate TEXT NOT NULL
+        creationDate TEXT NOT NULL,
+        sortOrder INTEGER NOT NULL DEFAULT 0 
       )
     ''');
 
@@ -88,6 +98,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 
+// ✨ ADDED: Enum to define the available sort options for the home page.
+enum HomeSortOption {
+  manual, // ✨ ADDED
+  dateNewest,
+  dateOldest,
+  nameAZ,
+  nameZA,
+}
 
 /// --- NOTIFIERS ---
 ValueNotifier<int> selectedPageNotifier = ValueNotifier(0);
@@ -95,7 +113,9 @@ ValueNotifier<bool> selectedThemeNotifier = ValueNotifier(false);
 // ✨ ADDED: Notifier for the primary theme color.
 ValueNotifier<Color> selectedColorNotifier = ValueNotifier(Colors.blue);
 ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
-
+// ✨ ADDED: Notifier to hold the current sort order for the home page folders.
+ValueNotifier<HomeSortOption> homeSortNotifier =
+    ValueNotifier(HomeSortOption.manual); // ✨ MODIFIED: Default to manual sort.
 
 /// --- THEME HELPERS ---
 
@@ -112,7 +132,8 @@ Future<void> loadThemePreference() async {
 
 // ✨ ADDED: Saves the theme preferences to disk and updates the notifiers.
 // This replaces the old toggleThemePreference function.
-Future<void> saveThemePreference({required bool isDarkMode, required Color color}) async {
+Future<void> saveThemePreference(
+    {required bool isDarkMode, required Color color}) async {
   final prefs = await SharedPreferences.getInstance();
 
   // Update the global notifiers to trigger UI rebuilds.
@@ -124,6 +145,23 @@ Future<void> saveThemePreference({required bool isDarkMode, required Color color
   await prefs.setInt('themeColor', color.value);
 }
 
+/// --- SORTING HELPERS ---
+
+// ✨ ADDED: Loads the saved home page sort preference from disk.
+Future<void> loadHomeSortPreference() async {
+  final prefs = await SharedPreferences.getInstance();
+  final savedIndex = prefs.getInt('homeSortOrder');
+  if (savedIndex != null && savedIndex < HomeSortOption.values.length) {
+    homeSortNotifier.value = HomeSortOption.values[savedIndex];
+  }
+}
+
+// ✨ ADDED: Saves the selected home page sort preference to disk.
+Future<void> saveHomeSortPreference(HomeSortOption option) async {
+  final prefs = await SharedPreferences.getInstance();
+  homeSortNotifier.value = option;
+  await prefs.setInt('homeSortOrder', option.index);
+}
 
 /// --- FOLDER DATA HELPERS ---
 
@@ -138,6 +176,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 0, // ✨ ADDED
     ),
     VaultFolder(
       id: 'videos_${now.millisecondsSinceEpoch + 1}',
@@ -147,6 +186,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 1, // ✨ ADDED
     ),
     VaultFolder(
       id: 'documents_${now.millisecondsSinceEpoch + 2}',
@@ -156,6 +196,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 2, // ✨ ADDED
     ),
     VaultFolder(
       id: 'notes_${now.millisecondsSinceEpoch + 3}',
@@ -165,6 +206,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 3, // ✨ ADDED
     ),
   ];
 }
@@ -172,12 +214,12 @@ List<VaultFolder> getDefaultFolders() {
 /// ✨ MODIFIED: Central function to refresh all item counts using efficient database queries.
 Future<void> refreshItemCounts() async {
   final currentFolders = List<VaultFolder>.from(foldersNotifier.value);
-  
+
   for (final folder in currentFolders) {
     // Get counts directly from the database, which is much faster.
     final fileCount = await StorageHelper.getFileCount(folder.id);
     final subfolderCount = await StorageHelper.getSubfolderCount(folder.id);
-    
+
     // Update the item count on the existing folder object.
     folder.itemCount = subfolderCount + fileCount;
   }
@@ -186,7 +228,6 @@ Future<void> refreshItemCounts() async {
   // Creating a new list from the modified one to ensure the ValueNotifier detects the change.
   foldersNotifier.value = List<VaultFolder>.from(currentFolders);
 }
-
 
 /// --- CONSTANTS FOR UI OPTIONS ---
 
@@ -246,7 +287,10 @@ class VaultFolder {
 
   /// The date and time the folder was created.
   final DateTime creationDate;
-  
+
+  /// ✨ ADDED: The manual sort order for this folder.
+  final int sortOrder;
+
   /// Number of items in the folder (files + subfolders).
   /// This is not stored in the database and is calculated dynamically.
   int itemCount;
@@ -260,6 +304,7 @@ class VaultFolder {
     this.itemCount = 0, // ✨ MODIFIED: Now has a default value and is not final
     required this.parentPath,
     required this.creationDate,
+    required this.sortOrder, // ✨ ADDED: Manual sort order
   });
 
   /// Create a new folder based on an existing one with changes
@@ -271,6 +316,7 @@ class VaultFolder {
     int? itemCount,
     String? parentPath,
     DateTime? creationDate,
+    int? sortOrder, // ✨ ADDED
   }) {
     return VaultFolder(
       id: id ?? this.id,
@@ -280,6 +326,7 @@ class VaultFolder {
       itemCount: itemCount ?? this.itemCount,
       parentPath: parentPath ?? this.parentPath,
       creationDate: creationDate ?? this.creationDate,
+      sortOrder: sortOrder ?? this.sortOrder, // ✨ ADDED
     );
   }
 
@@ -296,6 +343,7 @@ class VaultFolder {
       'color': color.value,
       'parentPath': parentPath,
       'creationDate': creationDate.toIso8601String(),
+      'sortOrder': sortOrder, // ✨ ADDED
     };
   }
 
@@ -312,6 +360,7 @@ class VaultFolder {
       color: Color(map['color']),
       parentPath: map['parentPath'],
       creationDate: DateTime.parse(map['creationDate']),
+      sortOrder: map['sortOrder'] ?? 0, // ✨ ADDED: Read from map, default to 0.
       // itemCount is not in the map, it will be populated later.
     );
   }
@@ -339,7 +388,7 @@ class VaultFile {
 
   /// Stores the ID of the folder where the file originally lived.
   final String originalParentPath;
-  
+
   /// A flag to indicate if the file is a favorite.
   final bool isFavorite;
 
@@ -1145,7 +1194,7 @@ class _FolderViewPageState extends State<FolderViewPage>
                 fit: StackFit.expand,
                 children: [
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(1),
                     child: _buildThumbnail(physicalFile, vaultFile.id),
                   ),
                   if (_isSelectionMode) _buildSelectionOverlay(isSelected),
@@ -1794,6 +1843,7 @@ class _FolderViewPageState extends State<FolderViewPage>
 [==== home_page.dart ===
 // lib/pages/home_page.dart
 import 'package:flutter/material.dart';
+import 'package:reorderable_grid_view/reorderable_grid_view.dart';
 import 'package:vlt/widgets/folder_card.dart';
 import '../data/notifiers.dart';
 import 'package:vlt/pages/folder_view_page.dart';
@@ -1812,50 +1862,50 @@ class HomePage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Welcome section
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                  Theme.of(context).colorScheme.secondary.withOpacity(0.1),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.security,
-                  size: 32,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Secure Vault',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Your private files are safe and encrypted',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color:
-                            Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
+          // Container(
+          //   width: double.infinity,
+          //   padding: const EdgeInsets.all(20),
+          //   decoration: BoxDecoration(
+          //     gradient: LinearGradient(
+          //       colors: [
+          //         Theme.of(context).colorScheme.primary.withOpacity(0.1),
+          //         Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+          //       ],
+          //       begin: Alignment.topLeft,
+          //       end: Alignment.bottomRight,
+          //     ),
+          //     borderRadius: BorderRadius.circular(16),
+          //     border: Border.all(
+          //       color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          //     ),
+          //   ),
+          //   child: Column(
+          //     crossAxisAlignment: CrossAxisAlignment.start,
+          //     children: [
+          //       Icon(
+          //         Icons.security,
+          //         size: 32,
+          //         color: Theme.of(context).colorScheme.primary,
+          //       ),
+          //       const SizedBox(height: 8),
+          //       Text(
+          //         'Secure Vault',
+          //         style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          //               fontWeight: FontWeight.bold,
+          //             ),
+          //       ),
+          //       const SizedBox(height: 4),
+          //       Text(
+          //         'Your private files are safe and encrypted',
+          //         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          //               color:
+          //                   Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+          //             ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
+          // const SizedBox(height: 24),
           // Folders section header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1889,44 +1939,110 @@ class HomePage extends StatelessWidget {
           const SizedBox(height: 16),
           // Folders grid
           Expanded(
-            child: ValueListenableBuilder<List<VaultFolder>>(
-              valueListenable: foldersNotifier,
-              builder: (context, folders, child) {
-                final rootFolders =
-                    folders.where((f) => f.parentPath == 'root').toList();
+            child: ValueListenableBuilder<HomeSortOption>(
+              valueListenable: homeSortNotifier,
+              builder: (context, sortOption, _) {
+                return ValueListenableBuilder<List<VaultFolder>>(
+                  valueListenable: foldersNotifier,
+                  builder: (context, folders, child) {
+                    final rootFolders =
+                        folders.where((f) => f.parentPath == 'root').toList();
 
-                if (rootFolders.isEmpty) {
-                  return _buildEmptyState(context);
-                }
-                return GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 1.1,
-                  ),
-                  itemCount: rootFolders.length,
-                  itemBuilder: (context, index) {
-                    final folder = rootFolders[index];
-                    
-                    return FolderCard(
-                      folder: folder,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => FolderViewPage(folder: folder),
-                          ),
-                        );
-                      },
-                      onRename: (folder, newName) {
-                        _renameFolder(context, folder, newName);
-                      },
-                      onDelete: (f) => _deleteFolder(context, f),
-                      onCustomize: (folder, icon, color) {
-                        _customizeFolder(context, folder, icon, color);
-                      },
-                    );
+                    // ✨ MODIFIED: Sorting logic now includes the 'manual' option.
+                    rootFolders.sort((a, b) {
+                      switch (sortOption) {
+                        case HomeSortOption.manual:
+                          return a.sortOrder.compareTo(b.sortOrder);
+                        case HomeSortOption.dateNewest:
+                          return b.creationDate.compareTo(a.creationDate);
+                        case HomeSortOption.dateOldest:
+                          return a.creationDate.compareTo(b.creationDate);
+                        case HomeSortOption.nameAZ:
+                          return a.name
+                              .toLowerCase()
+                              .compareTo(b.name.toLowerCase());
+                        case HomeSortOption.nameZA:
+                          return b.name
+                              .toLowerCase()
+                              .compareTo(a.name.toLowerCase());
+                      }
+                    });
+
+                    if (rootFolders.isEmpty) {
+                      return _buildEmptyState(context);
+                    }
+
+                    // ✨ ADDED: Conditionally return a reorderable grid or a standard one.
+                    if (sortOption == HomeSortOption.manual) {
+                      return ReorderableGridView.builder(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.1,
+                        ),
+                        itemCount: rootFolders.length,
+                        itemBuilder: (context, index) {
+                          final folder = rootFolders[index];
+                          return SizedBox(
+                            key: ValueKey(folder.id),
+                            child: FolderCard(
+                              folder: folder,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        FolderViewPage(folder: folder),
+                                  ),
+                                );
+                              },
+                              onRename: (f, newName) =>
+                                  _renameFolder(context, f, newName),
+                              onDelete: (f) => _deleteFolder(context, f),
+                              onCustomize: (f, icon, color) =>
+                                  _customizeFolder(context, f, icon, color),
+                            ),
+                          );
+                        },
+                        onReorder: (oldIndex, newIndex) {
+                          _onReorder(rootFolders, oldIndex, newIndex);
+                        },
+                      );
+                    } else {
+                      // This is the standard, non-reorderable grid.
+                      return GridView.builder(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.1,
+                        ),
+                        itemCount: rootFolders.length,
+                        itemBuilder: (context, index) {
+                          final folder = rootFolders[index];
+                          return FolderCard(
+                            folder: folder,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      FolderViewPage(folder: folder),
+                                ),
+                              );
+                            },
+                            onRename: (f, newName) =>
+                                _renameFolder(context, f, newName),
+                            onDelete: (f) => _deleteFolder(context, f),
+                            onCustomize: (f, icon, color) =>
+                                _customizeFolder(context, f, icon, color),
+                          );
+                        },
+                      );
+                    }
                   },
                 );
               },
@@ -1951,14 +2067,16 @@ class HomePage extends StatelessWidget {
           Text(
             'No folders yet',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                 ),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap the + button to create your first folder',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
                 ),
             textAlign: TextAlign.center,
           ),
@@ -1967,6 +2085,30 @@ class HomePage extends StatelessWidget {
     );
   }
 }
+
+// ✨ MODIFIED: Handles the logic for reordering folders and updates the UI instantly.
+void _onReorder(
+    List<VaultFolder> rootFolders, int oldIndex, int newIndex) async {
+  // 1. Perform the reorder in the local list.
+  final movedFolder = rootFolders.removeAt(oldIndex);
+  rootFolders.insert(newIndex, movedFolder);
+
+  // 2. Create a new list where each folder object has its 'sortOrder' property updated.
+  final List<VaultFolder> updatedRootFolders = [];
+  for (int i = 0; i < rootFolders.length; i++) {
+    updatedRootFolders.add(rootFolders[i].copyWith(sortOrder: i));
+  }
+
+  // 3. Update the database with the new correct sort order.
+  await StorageHelper.updateFolderSortOrder(updatedRootFolders);
+
+  // 4. Update the global notifier with the list that contains the updated objects.
+  final otherFolders = foldersNotifier.value
+      .where((folder) => folder.parentPath != 'root')
+      .toList();
+  foldersNotifier.value = [...updatedRootFolders, ...otherFolders];
+}
+
 
 /// Renames a folder's metadata in the database.
 void _renameFolder(
@@ -1999,12 +2141,13 @@ void _deleteFolder(BuildContext context, VaultFolder folder) async {
   // Find all children recursively to remove from the notifier list in one go.
   final List<String> idsToDelete = [folder.id];
   void findChildren(String parentId) {
-      final children = currentFolders.where((f) => f.parentPath == parentId);
-      for (final child in children) {
-          idsToDelete.add(child.id);
-          findChildren(child.id);
-      }
+    final children = currentFolders.where((f) => f.parentPath == parentId);
+    for (final child in children) {
+      idsToDelete.add(child.id);
+      findChildren(child.id);
+    }
   }
+
   findChildren(folder.id);
 
   currentFolders.removeWhere((f) => idsToDelete.contains(f.id));
@@ -4904,9 +5047,17 @@ class StorageHelper {
     }
 
     final db = await DatabaseHelper().database;
+
+    // ✨ ADDED: Get the highest current sort order to place the new folder at the end.
+    final maxOrderResult = await db.rawQuery(
+        'SELECT MAX(sortOrder) FROM folders WHERE parentPath = ?',
+        [newFolder.parentPath]);
+    final maxOrder = Sqflite.firstIntValue(maxOrderResult) ?? -1;
+    final folderToCreate = newFolder.copyWith(sortOrder: maxOrder + 1);
+
     await db.insert(
       'folders',
-      newFolder.toMap(),
+      folderToCreate.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -4921,6 +5072,21 @@ class StorageHelper {
     );
   }
 
+  // ✨ ADDED: Efficiently updates the sort order for a list of folders.
+  static Future<void> updateFolderSortOrder(
+      List<VaultFolder> reorderedFolders) async {
+    final db = await DatabaseHelper().database;
+    final batch = db.batch();
+
+    for (int i = 0; i < reorderedFolders.length; i++) {
+      final folder = reorderedFolders[i];
+      batch.update('folders', {'sortOrder': i},
+          where: 'id = ?', whereArgs: [folder.id]);
+    }
+
+    await batch.commit(noResult: true);
+  }
+
   static Future<void> deleteFolder(VaultFolder folderToDelete) async {
     final db = await DatabaseHelper().database;
 
@@ -4928,21 +5094,28 @@ class StorageHelper {
     final List<VaultFile> filesToDelete = [];
 
     Future<void> findChildren(String parentId) async {
-      final childrenFolders = await db.query('folders', where: 'parentPath = ?', whereArgs: [parentId]);
+      final childrenFolders =
+          await db.query('folders', where: 'parentPath = ?', whereArgs: [parentId]);
       for (var map in childrenFolders) {
         final childFolder = VaultFolder.fromMap(map);
         folderIdsToDelete.add(childFolder.id);
         await findChildren(childFolder.id);
       }
-      final childrenFiles = await db.query('files', where: 'originalParentPath = ?', whereArgs: [parentId]);
+      final childrenFiles = await db
+          .query('files', where: 'originalParentPath = ?', whereArgs: [parentId]);
       filesToDelete.addAll(childrenFiles.map((map) => VaultFile.fromMap(map)));
     }
 
     await findChildren(folderToDelete.id);
 
     await db.transaction((txn) async {
-      await txn.delete('files', where: 'originalParentPath IN (${folderIdsToDelete.map((_) => '?').join(',')})', whereArgs: folderIdsToDelete);
-      await txn.delete('folders', where: 'id IN (${folderIdsToDelete.map((_) => '?').join(',')})', whereArgs: folderIdsToDelete);
+      await txn.delete('files',
+          where:
+              'originalParentPath IN (${folderIdsToDelete.map((_) => '?').join(',')})',
+          whereArgs: folderIdsToDelete);
+      await txn.delete('folders',
+          where: 'id IN (${folderIdsToDelete.map((_) => '?').join(',')})',
+          whereArgs: folderIdsToDelete);
     });
 
     final folderDir = await findFolderDirectoryById(folderToDelete.id);
@@ -4986,7 +5159,8 @@ class StorageHelper {
 
   static Future<void> addFileRecord(VaultFile file) async {
     final db = await DatabaseHelper().database;
-    await db.insert('files', file.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('files', file.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<void> deleteFileRecord(String fileId) async {
@@ -5039,11 +5213,13 @@ class StorageHelper {
       }
     }
 
-    final movedFile = fileToMove.copyWith(originalParentPath: destinationFolder.id);
+    final movedFile =
+        fileToMove.copyWith(originalParentPath: destinationFolder.id);
     await updateFileMetadata(movedFile);
   }
 
-  static Future<void> moveFileToRecycleBin(VaultFile file, VaultFolder sourceFolder) async {
+  static Future<void> moveFileToRecycleBin(
+      VaultFile file, VaultFolder sourceFolder) async {
     final sourceDir = await findFolderDirectoryById(sourceFolder.id);
     final recycleBinDir = await getRecycleBinDirectory();
     if (sourceDir == null) return;
@@ -5060,8 +5236,10 @@ class StorageHelper {
     await updateFileMetadata(recycledFile);
   }
 
-  static Future<void> restoreFileFromRecycleBin(VaultFile fileToRestore) async {
-    final destinationDir = await findFolderDirectoryById(fileToRestore.originalParentPath);
+  static Future<void> restoreFileFromRecycleBin(
+      VaultFile fileToRestore) async {
+    final destinationDir =
+        await findFolderDirectoryById(fileToRestore.originalParentPath);
     final recycleBinDir = await getRecycleBinDirectory();
     if (destinationDir == null) return;
 
@@ -5070,7 +5248,8 @@ class StorageHelper {
       await sourceFile.rename(p.join(destinationDir.path, fileToRestore.id));
     }
 
-    final restoredFile = fileToRestore.copyWith(isInRecycleBin: false, setDeletionDateToNull: true);
+    final restoredFile = fileToRestore.copyWith(
+        isInRecycleBin: false, setDeletionDateToNull: true);
     await updateFileMetadata(restoredFile);
   }
 
@@ -5116,7 +5295,8 @@ class StorageHelper {
 
     try {
       final entities = folderDir.listSync(recursive: false);
-      return entities.whereType<File>()
+      return entities
+          .whereType<File>()
           .where((file) => !p.basename(file.path).startsWith('.'))
           .toList();
     } catch (e) {
@@ -5129,13 +5309,16 @@ class StorageHelper {
 
   static Future<int> getSubfolderCount(String parentId) async {
     final db = await DatabaseHelper().database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM folders WHERE parentPath = ?', [parentId]);
+    final result = await db
+        .rawQuery('SELECT COUNT(*) FROM folders WHERE parentPath = ?', [parentId]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   static Future<int> getFileCount(String parentId) async {
     final db = await DatabaseHelper().database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM files WHERE originalParentPath = ? AND isInRecycleBin = 0', [parentId]);
+    final result = await db.rawQuery(
+        'SELECT COUNT(*) FROM files WHERE originalParentPath = ? AND isInRecycleBin = 0',
+        [parentId]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -5150,6 +5333,10 @@ class StorageHelper {
     final List<VaultFolder> recoveredFolders = [];
     final List<VaultFile> recoveredFiles = [];
 
+    final maxOrderResult = await db
+        .rawQuery('SELECT MAX(sortOrder) FROM folders WHERE parentPath = ?', ['root']);
+    int nextRootSortOrder = (Sqflite.firstIntValue(maxOrderResult) ?? -1) + 1;
+
     final entries = vaultRoot.listSync(recursive: false);
     for (final entity in entries) {
       if (entity is Directory) {
@@ -5157,7 +5344,8 @@ class StorageHelper {
         if (folderId == _recycleBinId) continue; // skip recycle bin
 
         // Check if folder exists in DB
-        final existingFolder = await db.query('folders', where: 'id = ?', whereArgs: [folderId]);
+        final existingFolder =
+            await db.query('folders', where: 'id = ?', whereArgs: [folderId]);
         if (existingFolder.isEmpty) {
           final newFolder = VaultFolder(
             id: folderId,
@@ -5166,16 +5354,20 @@ class StorageHelper {
             color: Colors.grey,
             parentPath: 'root',
             creationDate: now,
+            sortOrder: nextRootSortOrder++, // ✨ MODIFIED
           );
-          await db.insert('folders', newFolder.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+          await db.insert('folders', newFolder.toMap(),
+              conflictAlgorithm: ConflictAlgorithm.replace);
           recoveredFolders.add(newFolder);
         }
 
         // Scan files in this folder
-        final files = entity.listSync(recursive: false).whereType<File>().toList();
+        final files =
+            entity.listSync(recursive: false).whereType<File>().toList();
         for (final file in files) {
           final fileId = p.basename(file.path);
-          final existingFile = await db.query('files', where: 'id = ?', whereArgs: [fileId]);
+          final existingFile =
+              await db.query('files', where: 'id = ?', whereArgs: [fileId]);
           if (existingFile.isEmpty) {
             final newFile = VaultFile(
               id: fileId,
@@ -5184,14 +5376,16 @@ class StorageHelper {
               dateAdded: now,
               originalParentPath: folderId,
             );
-            await db.insert('files', newFile.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+            await db.insert('files', newFile.toMap(),
+                conflictAlgorithm: ConflictAlgorithm.replace);
             recoveredFiles.add(newFile);
           }
         }
       }
     }
 
-    debugPrint('✅ Recovered ${recoveredFolders.length} folders, ${recoveredFiles.length} files.');
+    debugPrint(
+        '✅ Recovered ${recoveredFolders.length} folders, ${recoveredFiles.length} files.');
 
     // Refresh UI
     final allFolders = await getAllFolders();
@@ -5231,6 +5425,7 @@ class _FileTransferSheetState extends State<FileTransferSheet> {
       itemCount: 0,
       parentPath: '',
       creationDate: DateTime.now(),
+      sortOrder: 0, // ✨ ADDED: Fulfilled the required parameter.
     )
   ];
 
@@ -5385,7 +5580,7 @@ class FolderCard extends StatelessWidget {
   final void Function(VaultFolder folder, String newName) onRename;
   final void Function(VaultFolder folder) onDelete;
   final void Function(VaultFolder folder, IconData icon, Color color)
-      onCustomize;
+  onCustomize;
 
   const FolderCard({
     super.key,
@@ -5410,10 +5605,12 @@ class FolderCard extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: Center( // ✨ FIX: Centered the column
+                child: Center(
+                  // ✨ FIX: Centered the column
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min, // ✅ Important to limit height
+                    mainAxisSize:
+                        MainAxisSize.min, // ✅ Important to limit height
                     children: [
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -5426,9 +5623,8 @@ class FolderCard extends StatelessWidget {
                       const SizedBox(height: 12),
                       Text(
                         folder.name,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -5437,10 +5633,10 @@ class FolderCard extends StatelessWidget {
                       Text(
                         '${folder.itemCount} items',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withOpacity(0.6),
-                            ),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.6),
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -5518,51 +5714,37 @@ class FolderCard extends StatelessWidget {
 
   void _showRenameDialog(BuildContext context) {
     final controller = TextEditingController(text: folder.name);
-    showModalBottomSheet(
+
+    void submitRename() {
+      final newName = controller.text.trim();
+      if (newName.isNotEmpty) {
+        Navigator.pop(context);
+        onRename(folder, newName);
+      }
+    }
+
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          left: 24,
-          right: 24,
-          top: 24,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename Folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'New Name'),
+          onSubmitted: (_) => submitRename(),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Rename Folder',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.drive_file_rename_outline),
-              ),
-              onSubmitted: (value) {
-                if (value.trim().isNotEmpty) {
-                  Navigator.pop(context);
-                  onRename(folder, value.trim());
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () {
-                final newName = controller.text.trim();
-                if (newName.isNotEmpty) {
-                  Navigator.pop(context);
-                  onRename(folder, newName);
-                }
-              },
-              child: const Text('Rename'),
-            ),
-          ],
-        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(onPressed: submitRename, child: const Text('Rename')),
+        ],
       ),
     );
   }
 
+  // ✨ MODIFIED: Replaced the bottom sheet with a centered AlertDialog.
   void _showCustomizeDialog(BuildContext context) {
     IconData selectedIcon = folder.icon;
     Color selectedColor = folder.color;
@@ -5589,65 +5771,98 @@ class FolderCard extends StatelessWidget {
       Colors.purple,
       Colors.teal,
       Colors.pink,
+      Colors.indigo,
+      Colors.amber,
+      Colors.cyan,
+      Colors.lime,
+      Colors.deepOrange,
     ];
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Wrap(
-                spacing: 10,
-                children: availableIcons.map((icon) {
-                  return IconButton(
-                    icon: Icon(
-                      icon,
-                      color: icon == selectedIcon ? selectedColor : Colors.grey,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Customize Folder'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Icon',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    onPressed: () => setSheetState(() => selectedIcon = icon),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 10,
-                children: availableColors.map((color) {
-                  final isSelected = color == selectedColor;
-                  return GestureDetector(
-                    onTap: () => setSheetState(() => selectedColor = color),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: color,
-                      child: isSelected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 16,
-                            )
-                          : null,
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: availableIcons.map((icon) {
+                        return IconButton(
+                          icon: Icon(
+                            icon,
+                            color: icon == selectedIcon
+                                ? selectedColor
+                                : Colors.grey,
+                          ),
+                          onPressed: () =>
+                              setDialogState(() => selectedIcon = icon),
+                        );
+                      }).toList(),
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Color',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: availableColors.map((color) {
+                        final isSelected = color == selectedColor;
+                        return GestureDetector(
+                          onTap: () =>
+                              setDialogState(() => selectedColor = color),
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: color,
+                            child: isSelected
+                                ? const Icon(
+                                    Icons.check,
+                                    color: Colors.white,
+                                    size: 16,
+                                  )
+                                : null,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  onCustomize(folder, selectedIcon, selectedColor);
-                },
-                child: const Text('Apply'),
-              ),
-            ],
-          ),
-        ),
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    onCustomize(folder, selectedIcon, selectedColor);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
+
 === end of folder_card.dart ===]
 
 [==== folder_creator_sheet.dart ===
@@ -5871,20 +6086,22 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
       itemCount: 0,
       parentPath: widget.parentPath,
       creationDate: DateTime.now(),
+      sortOrder: 0, // ✨ ADDED: Provide a default sort order.
     );
 
     // ✨ MODIFIED: This now calls the database-aware createFolder method.
     await StorageHelper.createFolder(newFolder);
 
-    // Update the app's state list
-    final updatedList = List<VaultFolder>.from(foldersNotifier.value)..add(newFolder);
-    foldersNotifier.value = updatedList;
+    // ✨ MODIFIED: Reload all folders to get the correct new sortOrder from the DB.
+    foldersNotifier.value = await StorageHelper.getAllFolders();
 
     // Refresh the item counts for all folders to update the parent's count.
     await refreshItemCounts();
 
     if (widget.onFolderCreated != null) {
-      widget.onFolderCreated!(newFolder);
+      // Find the newly created folder in the refreshed list to pass back.
+      final created = foldersNotifier.value.firstWhere((f) => f.id == newFolder.id, orElse: () => newFolder);
+      widget.onFolderCreated!(created);
     }
 
     if (mounted) {
@@ -6054,6 +6271,8 @@ void main() async {
 
   // ✨ MODIFIED: Load both saved theme preferences on startup.
   await loadThemePreference();
+  // ✨ ADDED: Load saved sort preference on startup.
+  await loadHomeSortPreference();
 
   runApp(const VaultApp());
 }
@@ -6124,34 +6343,120 @@ class MainScreen extends StatelessWidget {
               ),
             ),
             centerTitle: true,
-            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            backgroundColor: selectedColorNotifier.value,
+            foregroundColor: Colors.white,
             elevation: 2,
             actions: [
+              // ✨ MODIFIED: Nested the builders to listen to both notifiers.
               ValueListenableBuilder(
-                valueListenable: selectedThemeNotifier,
-                builder: (context, isDarkMode, child) {
-                  return IconButton(
-                    // ✨ MODIFIED: This now calls the new save function to toggle theme.
-                    onPressed: () {
-                      saveThemePreference(
-                        isDarkMode: !isDarkMode,
-                        color: selectedColorNotifier.value,
+                valueListenable: homeSortNotifier,
+                builder: (context, sortValue, child) {
+                  // This inner builder ensures the menu rebuilds when the theme changes.
+                  return ValueListenableBuilder(
+                    valueListenable: selectedThemeNotifier,
+                    builder: (context, isDarkMode, child) {
+                      return PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) {
+                          if (value == 'toggle_theme') {
+                            saveThemePreference(
+                              isDarkMode: !isDarkMode,
+                              color: selectedColorNotifier.value,
+                            );
+                          } else if (value.startsWith('sort_')) {
+                            // This part remains the same.
+                            final optionName = value.replaceFirst('sort_', '');
+                            final option = HomeSortOption.values.firstWhere(
+                                (e) => e.name == optionName);
+                            saveHomeSortPreference(option);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          // --- Theme Toggle Option ---
+                          PopupMenuItem<String>(
+                            value: 'toggle_theme',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isDarkMode
+                                      ? Icons.light_mode_outlined
+                                      : Icons.dark_mode_outlined,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(isDarkMode
+                                    ? 'Switch to Light Mode'
+                                    : 'Switch to Dark Mode'),
+                              ],
+                            ),
+                          ),
+                          // --- Sort Sub-menu ---
+                          PopupMenuItem<String>(
+                            padding: EdgeInsets.zero,
+                            child: PopupMenuButton<String>(
+                              tooltip: 'Sort folders',
+                              child: const Padding(
+                                padding: EdgeInsets.only(
+                                    left: 16.0,
+                                    right: 8.0,
+                                    top: 12.0,
+                                    bottom: 12.0),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.sort),
+                                    SizedBox(width: 12),
+                                    Text('Sort by'),
+                                    Spacer(),
+                                    Icon(Icons.arrow_right),
+                                  ],
+                                ),
+                              ),
+                              onSelected: (value) {
+                                final optionName =
+                                    value.replaceFirst('sort_', '');
+                                final option = HomeSortOption.values
+                                    .firstWhere((e) => e.name == optionName);
+                                saveHomeSortPreference(option);
+                              },
+                              itemBuilder: (context) => [
+                                // ✨ ADDED: Manual sort option.
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_manual',
+                                  checked:
+                                      sortValue == HomeSortOption.manual,
+                                  child: const Text('Manual'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_dateNewest',
+                                  checked:
+                                      sortValue == HomeSortOption.dateNewest,
+                                  child: const Text('Newest first'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_dateOldest',
+                                  checked:
+                                      sortValue == HomeSortOption.dateOldest,
+                                  child: const Text('Oldest first'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_nameAZ',
+                                  checked: sortValue == HomeSortOption.nameAZ,
+                                  child: const Text('Name (A-Z)'),
+                                ),
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_nameZA',
+                                  checked: sortValue == HomeSortOption.nameZA,
+                                  child: const Text('Name (Z-A)'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       );
                     },
-                    icon: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: Icon(
-                        isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                        key: ValueKey(isDarkMode),
-                      ),
-                    ),
-                    tooltip: isDarkMode
-                        ? 'Switch to Light Mode'
-                        : 'Switch to Dark Mode',
                   );
                 },
               ),
-              const SizedBox(width: 10),
             ],
           ),
           body: IndexedStack(
@@ -6177,7 +6482,6 @@ class MainScreen extends StatelessWidget {
                     selectedIcon: Icon(Icons.explore),
                     label: 'Browser',
                   ),
-
                   NavigationDestination(
                     icon: Icon(Icons.settings_outlined),
                     selectedIcon: Icon(Icons.settings),

@@ -218,20 +218,22 @@ class _FolderCreatorSheetState extends State<FolderCreatorSheet> {
       itemCount: 0,
       parentPath: widget.parentPath,
       creationDate: DateTime.now(),
+      sortOrder: 0, // ✨ ADDED: Provide a default sort order.
     );
 
     // ✨ MODIFIED: This now calls the database-aware createFolder method.
     await StorageHelper.createFolder(newFolder);
 
-    // Update the app's state list
-    final updatedList = List<VaultFolder>.from(foldersNotifier.value)..add(newFolder);
-    foldersNotifier.value = updatedList;
+    // ✨ MODIFIED: Reload all folders to get the correct new sortOrder from the DB.
+    foldersNotifier.value = await StorageHelper.getAllFolders();
 
     // Refresh the item counts for all folders to update the parent's count.
     await refreshItemCounts();
 
     if (widget.onFolderCreated != null) {
-      widget.onFolderCreated!(newFolder);
+      // Find the newly created folder in the refreshed list to pass back.
+      final created = foldersNotifier.value.firstWhere((f) => f.id == newFolder.id, orElse: () => newFolder);
+      widget.onFolderCreated!(created);
     }
 
     if (mounted) {

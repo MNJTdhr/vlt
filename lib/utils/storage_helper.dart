@@ -89,9 +89,17 @@ class StorageHelper {
     }
 
     final db = await DatabaseHelper().database;
+
+    // ✨ ADDED: Get the highest current sort order to place the new folder at the end.
+    final maxOrderResult = await db.rawQuery(
+        'SELECT MAX(sortOrder) FROM folders WHERE parentPath = ?',
+        [newFolder.parentPath]);
+    final maxOrder = Sqflite.firstIntValue(maxOrderResult) ?? -1;
+    final folderToCreate = newFolder.copyWith(sortOrder: maxOrder + 1);
+
     await db.insert(
       'folders',
-      newFolder.toMap(),
+      folderToCreate.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -106,6 +114,21 @@ class StorageHelper {
     );
   }
 
+  // ✨ ADDED: Efficiently updates the sort order for a list of folders.
+  static Future<void> updateFolderSortOrder(
+      List<VaultFolder> reorderedFolders) async {
+    final db = await DatabaseHelper().database;
+    final batch = db.batch();
+
+    for (int i = 0; i < reorderedFolders.length; i++) {
+      final folder = reorderedFolders[i];
+      batch.update('folders', {'sortOrder': i},
+          where: 'id = ?', whereArgs: [folder.id]);
+    }
+
+    await batch.commit(noResult: true);
+  }
+
   static Future<void> deleteFolder(VaultFolder folderToDelete) async {
     final db = await DatabaseHelper().database;
 
@@ -113,21 +136,28 @@ class StorageHelper {
     final List<VaultFile> filesToDelete = [];
 
     Future<void> findChildren(String parentId) async {
-      final childrenFolders = await db.query('folders', where: 'parentPath = ?', whereArgs: [parentId]);
+      final childrenFolders =
+          await db.query('folders', where: 'parentPath = ?', whereArgs: [parentId]);
       for (var map in childrenFolders) {
         final childFolder = VaultFolder.fromMap(map);
         folderIdsToDelete.add(childFolder.id);
         await findChildren(childFolder.id);
       }
-      final childrenFiles = await db.query('files', where: 'originalParentPath = ?', whereArgs: [parentId]);
+      final childrenFiles = await db
+          .query('files', where: 'originalParentPath = ?', whereArgs: [parentId]);
       filesToDelete.addAll(childrenFiles.map((map) => VaultFile.fromMap(map)));
     }
 
     await findChildren(folderToDelete.id);
 
     await db.transaction((txn) async {
-      await txn.delete('files', where: 'originalParentPath IN (${folderIdsToDelete.map((_) => '?').join(',')})', whereArgs: folderIdsToDelete);
-      await txn.delete('folders', where: 'id IN (${folderIdsToDelete.map((_) => '?').join(',')})', whereArgs: folderIdsToDelete);
+      await txn.delete('files',
+          where:
+              'originalParentPath IN (${folderIdsToDelete.map((_) => '?').join(',')})',
+          whereArgs: folderIdsToDelete);
+      await txn.delete('folders',
+          where: 'id IN (${folderIdsToDelete.map((_) => '?').join(',')})',
+          whereArgs: folderIdsToDelete);
     });
 
     final folderDir = await findFolderDirectoryById(folderToDelete.id);
@@ -171,7 +201,8 @@ class StorageHelper {
 
   static Future<void> addFileRecord(VaultFile file) async {
     final db = await DatabaseHelper().database;
-    await db.insert('files', file.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('files', file.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<void> deleteFileRecord(String fileId) async {
@@ -224,11 +255,13 @@ class StorageHelper {
       }
     }
 
-    final movedFile = fileToMove.copyWith(originalParentPath: destinationFolder.id);
+    final movedFile =
+        fileToMove.copyWith(originalParentPath: destinationFolder.id);
     await updateFileMetadata(movedFile);
   }
 
-  static Future<void> moveFileToRecycleBin(VaultFile file, VaultFolder sourceFolder) async {
+  static Future<void> moveFileToRecycleBin(
+      VaultFile file, VaultFolder sourceFolder) async {
     final sourceDir = await findFolderDirectoryById(sourceFolder.id);
     final recycleBinDir = await getRecycleBinDirectory();
     if (sourceDir == null) return;
@@ -245,8 +278,10 @@ class StorageHelper {
     await updateFileMetadata(recycledFile);
   }
 
-  static Future<void> restoreFileFromRecycleBin(VaultFile fileToRestore) async {
-    final destinationDir = await findFolderDirectoryById(fileToRestore.originalParentPath);
+  static Future<void> restoreFileFromRecycleBin(
+      VaultFile fileToRestore) async {
+    final destinationDir =
+        await findFolderDirectoryById(fileToRestore.originalParentPath);
     final recycleBinDir = await getRecycleBinDirectory();
     if (destinationDir == null) return;
 
@@ -255,7 +290,8 @@ class StorageHelper {
       await sourceFile.rename(p.join(destinationDir.path, fileToRestore.id));
     }
 
-    final restoredFile = fileToRestore.copyWith(isInRecycleBin: false, setDeletionDateToNull: true);
+    final restoredFile = fileToRestore.copyWith(
+        isInRecycleBin: false, setDeletionDateToNull: true);
     await updateFileMetadata(restoredFile);
   }
 
@@ -301,7 +337,8 @@ class StorageHelper {
 
     try {
       final entities = folderDir.listSync(recursive: false);
-      return entities.whereType<File>()
+      return entities
+          .whereType<File>()
           .where((file) => !p.basename(file.path).startsWith('.'))
           .toList();
     } catch (e) {
@@ -314,13 +351,16 @@ class StorageHelper {
 
   static Future<int> getSubfolderCount(String parentId) async {
     final db = await DatabaseHelper().database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM folders WHERE parentPath = ?', [parentId]);
+    final result = await db
+        .rawQuery('SELECT COUNT(*) FROM folders WHERE parentPath = ?', [parentId]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   static Future<int> getFileCount(String parentId) async {
     final db = await DatabaseHelper().database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM files WHERE originalParentPath = ? AND isInRecycleBin = 0', [parentId]);
+    final result = await db.rawQuery(
+        'SELECT COUNT(*) FROM files WHERE originalParentPath = ? AND isInRecycleBin = 0',
+        [parentId]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -335,6 +375,10 @@ class StorageHelper {
     final List<VaultFolder> recoveredFolders = [];
     final List<VaultFile> recoveredFiles = [];
 
+    final maxOrderResult = await db
+        .rawQuery('SELECT MAX(sortOrder) FROM folders WHERE parentPath = ?', ['root']);
+    int nextRootSortOrder = (Sqflite.firstIntValue(maxOrderResult) ?? -1) + 1;
+
     final entries = vaultRoot.listSync(recursive: false);
     for (final entity in entries) {
       if (entity is Directory) {
@@ -342,7 +386,8 @@ class StorageHelper {
         if (folderId == _recycleBinId) continue; // skip recycle bin
 
         // Check if folder exists in DB
-        final existingFolder = await db.query('folders', where: 'id = ?', whereArgs: [folderId]);
+        final existingFolder =
+            await db.query('folders', where: 'id = ?', whereArgs: [folderId]);
         if (existingFolder.isEmpty) {
           final newFolder = VaultFolder(
             id: folderId,
@@ -351,16 +396,20 @@ class StorageHelper {
             color: Colors.grey,
             parentPath: 'root',
             creationDate: now,
+            sortOrder: nextRootSortOrder++, // ✨ MODIFIED
           );
-          await db.insert('folders', newFolder.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+          await db.insert('folders', newFolder.toMap(),
+              conflictAlgorithm: ConflictAlgorithm.replace);
           recoveredFolders.add(newFolder);
         }
 
         // Scan files in this folder
-        final files = entity.listSync(recursive: false).whereType<File>().toList();
+        final files =
+            entity.listSync(recursive: false).whereType<File>().toList();
         for (final file in files) {
           final fileId = p.basename(file.path);
-          final existingFile = await db.query('files', where: 'id = ?', whereArgs: [fileId]);
+          final existingFile =
+              await db.query('files', where: 'id = ?', whereArgs: [fileId]);
           if (existingFile.isEmpty) {
             final newFile = VaultFile(
               id: fileId,
@@ -369,14 +418,16 @@ class StorageHelper {
               dateAdded: now,
               originalParentPath: folderId,
             );
-            await db.insert('files', newFile.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+            await db.insert('files', newFile.toMap(),
+                conflictAlgorithm: ConflictAlgorithm.replace);
             recoveredFiles.add(newFile);
           }
         }
       }
     }
 
-    debugPrint('✅ Recovered ${recoveredFolders.length} folders, ${recoveredFiles.length} files.');
+    debugPrint(
+        '✅ Recovered ${recoveredFolders.length} folders, ${recoveredFiles.length} files.');
 
     // Refresh UI
     final allFolders = await getAllFolders();

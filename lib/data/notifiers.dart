@@ -6,6 +6,7 @@ import 'package:vlt/utils/storage_helper.dart';
 
 // ✨ ADDED: Enum to define the available sort options for the home page.
 enum HomeSortOption {
+  manual, // ✨ ADDED
   dateNewest,
   dateOldest,
   nameAZ,
@@ -20,7 +21,7 @@ ValueNotifier<Color> selectedColorNotifier = ValueNotifier(Colors.blue);
 ValueNotifier<List<VaultFolder>> foldersNotifier = ValueNotifier([]);
 // ✨ ADDED: Notifier to hold the current sort order for the home page folders.
 ValueNotifier<HomeSortOption> homeSortNotifier =
-    ValueNotifier(HomeSortOption.dateNewest);
+    ValueNotifier(HomeSortOption.manual); // ✨ MODIFIED: Default to manual sort.
 
 /// --- THEME HELPERS ---
 
@@ -81,6 +82,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 0, // ✨ ADDED
     ),
     VaultFolder(
       id: 'videos_${now.millisecondsSinceEpoch + 1}',
@@ -90,6 +92,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 1, // ✨ ADDED
     ),
     VaultFolder(
       id: 'documents_${now.millisecondsSinceEpoch + 2}',
@@ -99,6 +102,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 2, // ✨ ADDED
     ),
     VaultFolder(
       id: 'notes_${now.millisecondsSinceEpoch + 3}',
@@ -108,6 +112,7 @@ List<VaultFolder> getDefaultFolders() {
       itemCount: 0,
       parentPath: 'root',
       creationDate: now,
+      sortOrder: 3, // ✨ ADDED
     ),
   ];
 }

@@ -30,7 +30,6 @@ class DatabaseHelper {
     return dir;
   }
 
-
   /// Initializes the database by opening it and creating tables if they don't exist.
   Future<Database> _initDatabase() async {
     // ✨ MODIFIED: Get the path to our new persistent directory.
@@ -41,9 +40,19 @@ class DatabaseHelper {
     // the database is created.
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // ✨ MODIFIED: Incremented version for schema change.
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade, // ✨ ADDED: Handle database schema upgrades.
     );
+  }
+
+  // ✨ ADDED: Handles migrations when the database version increases.
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add the new sortOrder column to the existing folders table.
+      await db.execute(
+          'ALTER TABLE folders ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   /// SQL commands to create the initial tables.
@@ -58,7 +67,8 @@ class DatabaseHelper {
         iconFontPackage TEXT,
         color INTEGER NOT NULL,
         parentPath TEXT NOT NULL,
-        creationDate TEXT NOT NULL
+        creationDate TEXT NOT NULL,
+        sortOrder INTEGER NOT NULL DEFAULT 0 
       )
     ''');
 

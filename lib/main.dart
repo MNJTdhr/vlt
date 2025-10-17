@@ -190,6 +190,13 @@ class MainScreen extends StatelessWidget {
                                 saveHomeSortPreference(option);
                               },
                               itemBuilder: (context) => [
+                                // ✨ ADDED: Manual sort option.
+                                CheckedPopupMenuItem<String>(
+                                  value: 'sort_manual',
+                                  checked:
+                                      sortValue == HomeSortOption.manual,
+                                  child: const Text('Manual'),
+                                ),
                                 CheckedPopupMenuItem<String>(
                                   value: 'sort_dateNewest',
                                   checked:
