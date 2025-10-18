@@ -2197,7 +2197,8 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart'; // Needed for DragStartBehavior
+import 'package:flutter/physics.dart'; // Needed for Simulation
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -2207,6 +2208,51 @@ import 'package:vlt/models/vault_folder.dart';
 import 'package:vlt/utils/storage_helper.dart';
 import 'package:vlt/widgets/file_transfer_sheet.dart';
 import 'package:vlt/widgets/slideshow_options_sheet.dart';
+
+/// Custom scroll physics that allows overriding the drag start distance threshold.
+class CustomScrollPhysics extends AlwaysScrollableScrollPhysics {
+  final double dragStartDistance;
+
+  const CustomScrollPhysics({required this.dragStartDistance, super.parent});
+
+  @override
+  CustomScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return CustomScrollPhysics(
+      dragStartDistance: dragStartDistance,
+      parent: buildParent(ancestor),
+    );
+  }
+
+  @override
+  double get dragStartDistanceMotionThreshold => dragStartDistance;
+}
+
+/// Custom scroll physics that removes the ballistic (settling) animation.
+class NoBallisticScrollPhysics extends CustomScrollPhysics {
+  const NoBallisticScrollPhysics({
+    required super.dragStartDistance,
+    super.parent,
+  });
+
+  @override
+  NoBallisticScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return NoBallisticScrollPhysics(
+      dragStartDistance: dragStartDistance,
+      parent: buildParent(ancestor),
+    );
+  }
+
+  @override
+  Simulation? createBallisticSimulation(
+    ScrollMetrics position,
+    double velocity,
+  ) {
+    if (velocity.abs() < kMinFlingVelocity) {
+      return null;
+    }
+    return super.createBallisticSimulation(position, velocity);
+  }
+}
 
 class PhotoViewPage extends StatefulWidget {
   final List<VaultFile> files;
@@ -2246,15 +2292,17 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
   bool _isInitialLoad = true;
 
-  // Cached folder directory (resolved once)
   Directory? _parentFolderDir;
   bool _folderReady = false;
 
-  // Cache for FileImages to avoid recreating providers
   final Map<int, FileImage> _imageProviderCache = {};
 
-  // ✨ ADDED: State to track pointer count for fixing gesture conflicts.
   int _pointerCount = 0;
+
+  // State for Undo functionality
+  VaultFile? _lastDeletedFile;
+  int? _lastDeletedIndex;
+  Timer? _undoCommitTimer;
 
   @override
   void initState() {
@@ -2267,14 +2315,15 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
     _pageController = PageController(initialPage: _currentIndex);
 
-    _zoomAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    )..addListener(() {
-        if (_zoomAnimation != null) {
-          _transformationController.value = _zoomAnimation!.value;
-        }
-      });
+    _zoomAnimationController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 300),
+        )..addListener(() {
+          if (_zoomAnimation != null) {
+            _transformationController.value = _zoomAnimation!.value;
+          }
+        });
 
     _transformationController.addListener(() {
       final scale = _transformationController.value.getMaxScaleOnAxis();
@@ -2285,7 +2334,6 @@ class _PhotoViewPageState extends State<PhotoViewPage>
       }
     });
 
-    // Resolve the parent folder directory and begin precaching
     _resolveFolderDirAndPrecache();
   }
 
@@ -2293,22 +2341,20 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_isInitialLoad) {
-      // Additional preloading handled after folder ready
       _isInitialLoad = false;
     }
   }
 
   Future<void> _resolveFolderDirAndPrecache() async {
-    // Resolve once
-    final dir =
-        await StorageHelper.findFolderDirectoryById(widget.parentFolder.id);
+    final dir = await StorageHelper.findFolderDirectoryById(
+      widget.parentFolder.id,
+    );
     if (!mounted) return;
     setState(() {
       _parentFolderDir = dir;
       _folderReady = true;
     });
 
-    // Precache current and neighbors after first frame so context is valid for precacheImage
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _precacheSurrounding(_currentIndex);
@@ -2317,10 +2363,15 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   Future<void> _precacheSurrounding(int index) async {
-    if (!_folderReady || _parentFolderDir == null) return;
-    // Precache current, +/-2
-    for (int i = -2; i <= 2; i++) {
-      _precacheImage(index + i);
+    if (!_folderReady || _parentFolderDir == null || _updatableFiles.isEmpty)
+      return;
+    int lowerBound = max(0, index - 2);
+    int upperBound = min(_updatableFiles.length - 1, index + 2);
+
+    for (int i = lowerBound; i <= upperBound; i++) {
+      if (i >= 0 && i < _updatableFiles.length) {
+        _precacheImage(i);
+      }
     }
   }
 
@@ -2331,18 +2382,24 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     final vaultFile = _updatableFiles[index];
     final file = File(p.join(_parentFolderDir!.path, vaultFile.id));
 
-    if (!await file.exists()) return;
+    if (!await file.exists()) {
+      _imageProviderCache.remove(index);
+      return;
+    }
 
-    // Cache the FileImage for reuse
-    final provider = FileImage(file);
-    _imageProviderCache[index] = provider;
+    // Re-cache if not present or maybe if file changed (less likely needed)
+    if (!_imageProviderCache.containsKey(index)) {
+      final provider = FileImage(file);
+      _imageProviderCache[index] = provider;
 
-    try {
-      // ignore: use_build_context_synchronously
-      precacheImage(provider, context);
-    } catch (e) {
-      // ignore precache errors silently
-      debugPrint('Precache failed for ${file.path}: $e');
+      try {
+        if (mounted) {
+          precacheImage(provider, context);
+        }
+      } catch (e) {
+        debugPrint('Precache failed for ${file.path}: $e');
+        _imageProviderCache.remove(index);
+      }
     }
   }
 
@@ -2353,6 +2410,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     _zoomAnimationController.dispose();
     _transformationController.dispose();
     _imageProviderCache.clear();
+    _undoCommitTimer?.cancel();
     super.dispose();
   }
 
@@ -2379,9 +2437,10 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     final begin = _transformationController.value;
     final end = Matrix4.identity();
     if (targetScale != 1.0) {
-      // Calculate translation so tapped point stays under the finger after scale
-      end.translate(-position.dx * (targetScale - 1),
-          -position.dy * (targetScale - 1));
+      end.translate(
+        -position.dx * (targetScale - 1),
+        -position.dy * (targetScale - 1),
+      );
       end.scale(targetScale);
     }
 
@@ -2391,32 +2450,28 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     _zoomAnimationController.forward(from: 0);
   }
 
-  // Modified: only allow swipe DOWN to dismiss; swipe UP does nothing now.
   void _handleVerticalDragEnd(DragEndDetails details) {
     if (_isSlideshowActive) return;
     final velocity = details.primaryVelocity ?? 0.0;
 
     if (velocity > 300) {
+      _cancelUndo();
       Navigator.of(context).pop();
     }
-    // removed: showing info on swipe up
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_updatableFiles.isEmpty) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Text(
-            'No files to display',
-            style: TextStyle(color: Colors.white, fontSize: 16),
-          ),
-        ),
-      );
+    if (_updatableFiles.isEmpty && _lastDeletedFile == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop();
+      });
+      return const Scaffold(backgroundColor: Colors.black);
     }
 
-    // If folder dir not ready yet, show a simple full-screen loader (only once)
+    // Clamp index BEFORE building PageView
+    _currentIndex = _currentIndex.clamp(0, max(0, _updatableFiles.length - 1));
+
     if (!_folderReady) {
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -2430,7 +2485,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
         bottom: false,
         child: Stack(
           children: [
-            _isSlideshowActive ? _buildSlideshowView() : _buildInteractiveView(),
+            _isSlideshowActive
+                ? _buildSlideshowView()
+                : _buildInteractiveView(),
             IgnorePointer(
               ignoring: !_showUI,
               child: Stack(
@@ -2446,58 +2503,88 @@ class _PhotoViewPageState extends State<PhotoViewPage>
                       child: _buildAppBar(),
                     ),
                   ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: AnimatedSlide(
-                      offset: _showUI ? Offset.zero : const Offset(0, 1.5),
-                      duration: const Duration(milliseconds: 250),
-                      curve: Curves.easeOutCubic,
-                      child: _buildBottomToolbar(),
-                    ),
-                  ),
                 ],
               ),
             ),
           ],
         ),
       ),
+      bottomNavigationBar: AnimatedSlide(
+        offset: _showUI ? Offset.zero : const Offset(0, 1.5),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+        child: IgnorePointer(ignoring: !_showUI, child: _buildBottomToolbar()),
+      ),
     );
   }
 
-  // ✨ MODIFIED: This is now the final, correct implementation for smooth gallery swiping.
   Widget _buildInteractiveView() {
+    final itemCount = _updatableFiles.length;
+
+    // Jump in callback if index is invalid AFTER build
+    if (_pageController.hasClients &&
+        _pageController.page != null &&
+        _pageController.page! >= itemCount &&
+        itemCount > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) {
+          _pageController.jumpToPage(itemCount - 1);
+        }
+      });
+    }
+
     return Listener(
       onPointerDown: (_) => setState(() => _pointerCount++),
       onPointerUp: (_) => setState(() => _pointerCount--),
       onPointerCancel: (_) => setState(() => _pointerCount--),
       child: PageView.builder(
-        // This physics combination provides the best gallery feel.
-        // It allows swiping but disables it for zooming (when pointerCount > 1 or image is zoomed).
-        physics: (_isZoomed || _pointerCount > 1)
+        // Use a Key based on itemCount to force rebuild when list changes.
+        // Add lastDeletedFile presence to key ensures rebuild on undo start/finish.
+        key: ValueKey(
+          itemCount.toString() + (_lastDeletedFile != null).toString(),
+        ),
+        physics: (_isZoomed || _pointerCount > 1 || _lastDeletedFile != null)
             ? const NeverScrollableScrollPhysics()
-            : const AlwaysScrollableScrollPhysics(),
+            : const NoBallisticScrollPhysics(dragStartDistance: 15.0),
         controller: _pageController,
-        itemCount: _updatableFiles.length,
+        itemCount: itemCount,
         onPageChanged: (index) {
+          if (_lastDeletedFile != null) return;
           setState(() {
             _currentIndex = index;
-            _transformationController.value = Matrix4.identity();
+            if (!_isZoomed) {
+              _transformationController.value = Matrix4.identity();
+            }
             _isZoomed = false;
           });
-
-          // Pre-cache surrounding images for smooth swipe
           _precacheSurrounding(index);
         },
         itemBuilder: (context, index) {
-          return _buildImagePage(_updatableFiles[index], index: index);
+          // This index should be correct due to PageView rebuild
+          if (index >= _updatableFiles.length) {
+            debugPrint(
+              "ItemBuilder attempting to build invalid index $index / ${_updatableFiles.length}",
+            );
+            return Container(color: Colors.black);
+          }
+          final file = _updatableFiles[index];
+          // Use index directly for cache key
+          return _buildImagePage(file, index: index);
         },
       ),
     );
   }
 
   Widget _buildSlideshowView() {
+    int displayIndex = _currentIndex;
+    if (displayIndex >= _updatableFiles.length && _updatableFiles.isNotEmpty) {
+      displayIndex = _updatableFiles.length - 1;
+    } else if (_updatableFiles.isEmpty) {
+      _stopSlideshow();
+      return Container(color: Colors.black);
+    }
+    if (displayIndex < 0) return Container(color: Colors.black);
+
     return Center(
       child: AnimatedSwitcher(
         duration: _slideshowTransitionDuration,
@@ -2505,24 +2592,39 @@ class _PhotoViewPageState extends State<PhotoViewPage>
           return FadeTransition(opacity: animation, child: child);
         },
         child: _buildImagePage(
-          _updatableFiles[_currentIndex],
-          key: ValueKey<String>(_updatableFiles[_currentIndex].id),
-          index: _currentIndex,
+          _updatableFiles[displayIndex],
+          key: ValueKey<String>(
+            _updatableFiles[displayIndex].id + displayIndex.toString(),
+          ),
+          index: displayIndex,
         ),
       ),
     );
   }
 
   Widget _buildImagePage(VaultFile vaultFile, {Key? key, required int index}) {
-    // We rely on cached _parentFolderDir and _imageProviderCache[index]
-    final file = File(p.join(_parentFolderDir!.path, vaultFile.id));
-    final provider = _imageProviderCache[index] ?? FileImage(file);
+    if (!_folderReady || _parentFolderDir == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-    // Ensure provider cached for future
-    _imageProviderCache[index] = provider;
+    final file = File(p.join(_parentFolderDir!.path, vaultFile.id));
+
+    // Check existence. If missing, remove cache and show broken image.
+    if (!file.existsSync()) {
+      _imageProviderCache.remove(index);
+      return const Center(
+        child: Icon(Icons.broken_image, color: Colors.white, size: 60),
+      );
+    }
+
+    // Get provider from cache or create+cache it. Use index as the key.
+    final provider = _imageProviderCache.putIfAbsent(
+      index,
+      () => FileImage(file),
+    );
 
     return GestureDetector(
-      key: key,
+      key: key, // Use the key passed down
       onTap: _onViewTap,
       onDoubleTapDown: _handleDoubleTapDown,
       onDoubleTap: _handleDoubleTap,
@@ -2536,7 +2638,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
             image: provider,
             fit: BoxFit.contain,
             gaplessPlayback: true,
-            filterQuality: FilterQuality.high,
+            filterQuality: FilterQuality.medium,
             frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
               if (wasSynchronouslyLoaded) return child;
               return AnimatedOpacity(
@@ -2547,12 +2649,9 @@ class _PhotoViewPageState extends State<PhotoViewPage>
               );
             },
             errorBuilder: (context, error, stackTrace) {
+              _imageProviderCache.remove(index); // Remove bad entry on error
               return const Center(
-                child: Icon(
-                  Icons.broken_image,
-                  color: Colors.white,
-                  size: 60,
-                ),
+                child: Icon(Icons.broken_image, color: Colors.white, size: 60),
               );
             },
           ),
@@ -2562,7 +2661,40 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   AppBar _buildAppBar() {
-    final vaultFile = _updatableFiles[_currentIndex];
+    int displayIndex = _currentIndex;
+    if (displayIndex >= _updatableFiles.length && _updatableFiles.isNotEmpty) {
+      displayIndex = _updatableFiles.length - 1;
+    } else if (_updatableFiles.isEmpty) {
+      if (_lastDeletedFile != null && _lastDeletedIndex != null) {
+        return AppBar(
+          backgroundColor: Colors.black.withOpacity(0.5),
+          foregroundColor: Colors.white,
+          leading: BackButton(
+            color: Colors.white,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: Text(
+            _lastDeletedFile!.fileName,
+            style: const TextStyle(fontStyle: FontStyle.italic),
+          ),
+          actions: const [SizedBox(width: 48)],
+        );
+      } else {
+        return AppBar(
+          backgroundColor: Colors.black.withOpacity(0.5),
+          leading: BackButton(
+            color: Colors.white,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        );
+      }
+    }
+    if (displayIndex < 0) {
+      return AppBar(backgroundColor: Colors.black.withOpacity(0.5));
+    }
+
+    final vaultFile = _updatableFiles[displayIndex];
+    final bool actionsEnabled = _lastDeletedFile == null;
 
     return AppBar(
       backgroundColor: Colors.black.withOpacity(0.5),
@@ -2572,28 +2704,39 @@ class _PhotoViewPageState extends State<PhotoViewPage>
         color: Colors.white,
         onPressed: () {
           _stopSlideshow();
+          _cancelUndo();
           Navigator.of(context).pop();
         },
       ),
       title: Text(vaultFile.fileName, overflow: TextOverflow.ellipsis),
       actions: [
         IconButton(
-          icon: Icon(_isSlideshowActive
-              ? Icons.stop_circle_outlined
-              : Icons.play_circle_outline),
+          icon: Icon(
+            _isSlideshowActive
+                ? Icons.stop_circle_outlined
+                : Icons.play_circle_outline,
+            color: (_updatableFiles.length <= 1 || !actionsEnabled)
+                ? Colors.grey
+                : Colors.white,
+          ),
           tooltip: _isSlideshowActive ? 'Stop Slideshow' : 'Start Slideshow',
-          onPressed: () {
-            if (_isSlideshowActive) {
-              _stopSlideshow();
-            } else {
-              _showSlideshowOptions();
-            }
-          },
+          onPressed: (_updatableFiles.length <= 1 || !actionsEnabled)
+              ? null
+              : () {
+                  if (_isSlideshowActive) {
+                    _stopSlideshow();
+                  } else {
+                    _showSlideshowOptions();
+                  }
+                },
         ),
         IconButton(
-          icon: const Icon(Icons.info_outline),
+          icon: Icon(
+            Icons.info_outline,
+            color: actionsEnabled ? Colors.white : Colors.grey,
+          ),
           tooltip: 'Details',
-          onPressed: _showInfoSheet,
+          onPressed: actionsEnabled ? _showInfoSheet : null,
         ),
         const SizedBox(width: 6),
       ],
@@ -2601,60 +2744,90 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   Widget _buildBottomToolbar() {
-    final currentFile = _updatableFiles[_currentIndex];
+    int displayIndex = _currentIndex.clamp(
+      0,
+      max(0, _updatableFiles.length - 1),
+    );
 
-    return SafeArea(
-      top: false,
-      child: Container(
-        decoration: BoxDecoration(color: Colors.black.withOpacity(0.5)),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildBottomAction(Icons.drive_file_move_outline, 'Transfer',
-                _showTransferSheet),
-            _buildBottomAction(Icons.edit, 'Rename', _showRenameDialog),
-            _buildBottomAction(
-                Icons.delete, 'Recycle', _moveCurrentFileToRecycleBin),
-            _buildFavoriteButton(currentFile),
-            _buildBottomAction(Icons.share_outlined, 'Share', _shareCurrentFile),
-          ],
-        ),
+    VaultFile? currentFile;
+    if (_lastDeletedFile != null &&
+        _lastDeletedIndex == displayIndex &&
+        _updatableFiles.isEmpty) {
+      currentFile = _lastDeletedFile;
+    } else if (displayIndex < _updatableFiles.length) {
+      currentFile = _updatableFiles[displayIndex];
+    }
+
+    if (currentFile == null) return const SizedBox.shrink();
+
+    return Container(
+      color:
+          Theme.of(context).bottomAppBarTheme.color ??
+          Colors.black.withOpacity(0.5),
+      padding: const EdgeInsets.symmetric(
+        vertical: 10,
+        horizontal: 8,
+      ).copyWith(bottom: MediaQuery.of(context).padding.bottom + 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildBottomAction(
+            Icons.drive_file_move_outline,
+            'Transfer',
+            _showTransferSheet,
+          ),
+          _buildBottomAction(Icons.edit, 'Rename', _showRenameDialog),
+          _buildBottomAction(
+            Icons.delete,
+            'Recycle',
+            _moveCurrentFileToRecycleBin,
+          ),
+          _buildFavoriteButton(currentFile),
+          _buildBottomAction(Icons.share_outlined, 'Share', _shareCurrentFile),
+        ],
       ),
     );
   }
 
   Widget _buildFavoriteButton(VaultFile currentFile) {
+    final bool enabled = _lastDeletedFile == null;
+    final Color activeColor = currentFile.isFavorite
+        ? Colors.red
+        : Colors.white;
+    final Color color = enabled ? activeColor : Colors.grey;
+    final IconData icon = currentFile.isFavorite
+        ? Icons.favorite
+        : Icons.favorite_border;
+
     return GestureDetector(
-      onTap: _toggleFavorite,
+      onTap: enabled ? _toggleFavorite : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(currentFile.isFavorite ? Icons.favorite : Icons.favorite_border,
-              color: currentFile.isFavorite ? Colors.red : Colors.white),
+          Icon(icon, color: color),
           const SizedBox(height: 6),
-          Text(
-            'Favourite',
-            style: TextStyle(
-              color: currentFile.isFavorite ? Colors.red : Colors.white,
-              fontSize: 12,
-            ),
-          ),
+          Text('Favourite', style: TextStyle(color: color, fontSize: 12)),
         ],
       ),
     );
   }
 
   Widget _buildBottomAction(
-      IconData icon, String label, VoidCallback onPressed) {
+    IconData icon,
+    String label,
+    VoidCallback onPressed,
+  ) {
+    final bool enabled = _lastDeletedFile == null;
+    final Color color = enabled ? Colors.white : Colors.grey;
+
     return GestureDetector(
-      onTap: onPressed,
+      onTap: enabled ? onPressed : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.white),
+          Icon(icon, color: color),
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+          Text(label, style: TextStyle(color: color, fontSize: 12)),
         ],
       ),
     );
@@ -2662,6 +2835,7 @@ class _PhotoViewPageState extends State<PhotoViewPage>
 
   // --- Slideshow Functions ---
   Future<void> _showSlideshowOptions() async {
+    if (_lastDeletedFile != null) return;
     final options = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => const SlideshowOptionsSheet(),
@@ -2680,66 +2854,84 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   }
 
   void _startSlideshow(Duration interval, Duration transition) {
+    if (_updatableFiles.length <= 1 || _lastDeletedFile != null) return;
     setState(() {
       _isSlideshowActive = true;
       _showUI = false;
       _slideshowTransitionDuration = transition;
+      _transformationController.value = Matrix4.identity();
+      _isZoomed = false;
     });
 
     _slideshowTimer = Timer.periodic(interval, (timer) {
-      if (!mounted) {
+      if (!mounted || !_isSlideshowActive) {
         timer.cancel();
+        return;
+      }
+      if (_updatableFiles.length <= 1) {
+        _stopSlideshow();
         return;
       }
 
       int nextIndex;
       if (_isSlideshowRandom) {
-        if (_updatableFiles.length <= 1) return;
         final random = Random();
         do {
           nextIndex = random.nextInt(_updatableFiles.length);
         } while (nextIndex == _currentIndex);
       } else {
-        nextIndex = (_currentIndex + 1) % _updatableFiles.length; // Loop back
+        nextIndex = (_currentIndex + 1) % _updatableFiles.length;
       }
 
-      // Pre-cache the next image in the slideshow.
-      _precacheImage(nextIndex + 1);
+      if (!_isSlideshowRandom) {
+        _precacheImage(nextIndex + 1);
+      }
 
-      setState(() {
-        _currentIndex = nextIndex;
-      });
+      if (mounted) {
+        setState(() {
+          _currentIndex = nextIndex;
+        });
+      } else {
+        timer.cancel();
+      }
     });
   }
 
-  // ✨ MODIFIED: This function now reliably stops the slideshow on the current image.
   void _stopSlideshow() {
+    bool wasActive = _isSlideshowActive;
     _slideshowTimer?.cancel();
-    if (mounted && _isSlideshowActive) {
-      // First, set the state to switch the UI from slideshow view to the interactive PageView.
+    _slideshowTimer = null;
+    if (mounted && wasActive) {
       setState(() {
         _isSlideshowActive = false;
         _showUI = true;
       });
-
-      // After the UI has rebuilt in the next frame, command the PageController to jump.
-      // This prevents a race condition where the controller is asked to jump before the PageView is on screen.
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        int safeIndex = _currentIndex.clamp(
+          0,
+          max(0, _updatableFiles.length - 1),
+        );
         if (mounted && _pageController.hasClients) {
-          _pageController.jumpToPage(_currentIndex);
+          _pageController.jumpToPage(safeIndex);
         }
       });
     }
   }
 
   // --- Other Action Methods ---
-  void _unhidePlaceholder() => ScaffoldMessenger.of(context)
-      .showSnackBar(const SnackBar(content: Text('Unhide coming soon!')));
+  void _unhidePlaceholder() => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(const SnackBar(content: Text('Unhide coming soon!')));
 
   Future<void> _showRenameDialog() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
+    _stopSlideshow();
+
     final currentFile = _updatableFiles[_currentIndex];
-    final TextEditingController controller =
-        TextEditingController(text: currentFile.fileName);
+    final TextEditingController controller = TextEditingController(
+      text: currentFile.fileName,
+    );
 
     final String? newName = await showDialog<String>(
       context: context,
@@ -2773,127 +2965,318 @@ class _PhotoViewPageState extends State<PhotoViewPage>
     if (newName != null && newName != currentFile.fileName && mounted) {
       final updatedFile = currentFile.copyWith(fileName: newName);
 
-      // Update state locally for instant UI change
       setState(() {
-        _updatableFiles[_currentIndex] = updatedFile;
+        if (_currentIndex < _updatableFiles.length &&
+            _updatableFiles[_currentIndex].id == currentFile.id) {
+          _updatableFiles[_currentIndex] = updatedFile;
+        }
       });
 
-      // Update in the database
       await StorageHelper.updateFileMetadata(updatedFile);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File renamed to "$newName"')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('File renamed to "$newName"')));
       }
     }
   }
 
   Future<void> _toggleFavorite() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
+    _stopSlideshow();
+
     final currentFile = _updatableFiles[_currentIndex];
-    final updatedFile =
-        currentFile.copyWith(isFavorite: !currentFile.isFavorite);
+    final updatedFile = currentFile.copyWith(
+      isFavorite: !currentFile.isFavorite,
+    );
 
     setState(() {
-      _updatableFiles[_currentIndex] = updatedFile;
+      if (_currentIndex < _updatableFiles.length &&
+          _updatableFiles[_currentIndex].id == currentFile.id) {
+        _updatableFiles[_currentIndex] = updatedFile;
+      }
     });
 
     await StorageHelper.updateFileMetadata(updatedFile);
   }
 
   Future<void> _showTransferSheet() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
     _stopSlideshow();
 
     final currentFile = _updatableFiles[_currentIndex];
+    final int indexToModify = _currentIndex;
 
     final VaultFolder? destinationFolder =
         await showModalBottomSheet<VaultFolder>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => SizedBox(
-        height: MediaQuery.of(context).size.height * 0.6,
-        child: FileTransferSheet(sourceFolder: widget.parentFolder),
-      ),
-    );
+          context: context,
+          isScrollControlled: true,
+          builder: (ctx) => SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: FileTransferSheet(sourceFolder: widget.parentFolder),
+          ),
+        );
 
     if (destinationFolder != null && mounted) {
       await StorageHelper.transferFile(
-          currentFile, widget.parentFolder, destinationFolder);
+        currentFile,
+        widget.parentFolder,
+        destinationFolder,
+      );
       await refreshItemCounts();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('File transferred to "${destinationFolder.name}"')),
+            content: Text('File transferred to "${destinationFolder.name}"'),
+          ),
         );
-        Navigator.of(context).pop();
+
+        setState(() {
+          if (indexToModify < _updatableFiles.length &&
+              _updatableFiles[indexToModify].id == currentFile.id) {
+            _updatableFiles.removeAt(indexToModify);
+            _imageProviderCache.remove(indexToModify);
+            if (_currentIndex >= _updatableFiles.length &&
+                _updatableFiles.isNotEmpty) {
+              _currentIndex = _updatableFiles.length - 1;
+            }
+          }
+        });
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _updatableFiles.isEmpty) {
+            Navigator.of(context).pop();
+          } else if (mounted && _pageController.hasClients) {
+            int safeIndex = _currentIndex.clamp(
+              0,
+              max(0, _updatableFiles.length - 1),
+            );
+            _pageController.jumpToPage(safeIndex);
+            _precacheSurrounding(safeIndex);
+          }
+        });
       }
     }
   }
 
   Future<void> _moveCurrentFileToRecycleBin() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
     _stopSlideshow();
+    _cancelUndo();
 
     final currentFile = _updatableFiles[_currentIndex];
+    final int indexToDelete = _currentIndex;
 
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Move to Recycle Bin'),
         content: Text(
-            'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?'),
+          'Are you sure you want to move "${currentFile.fileName}" to the recycle bin?',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Move')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Move'),
+          ),
         ],
       ),
     );
 
-    if (confirmed == true && mounted) {
-      await StorageHelper.moveFileToRecycleBin(
-          currentFile, widget.parentFolder);
-      await refreshItemCounts();
-      if (mounted) Navigator.of(context).pop();
+    if (confirmed != true || !mounted) return;
+
+    final fileToDelete = _updatableFiles[indexToDelete];
+    setState(() {
+      _lastDeletedFile = fileToDelete;
+      _lastDeletedIndex = indexToDelete;
+      _updatableFiles.removeAt(indexToDelete);
+      _imageProviderCache.remove(indexToDelete);
+
+      if (_currentIndex >= _updatableFiles.length &&
+          _updatableFiles.isNotEmpty) {
+        _currentIndex = _updatableFiles.length - 1;
+      }
+    });
+
+    StorageHelper.moveFileToRecycleBin(
+      fileToDelete,
+      widget.parentFolder,
+    ).then((_) => refreshItemCounts());
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _updatableFiles.isEmpty) {
+        Navigator.of(context).pop();
+      } else if (mounted && _pageController.hasClients) {
+        int safeIndex = _currentIndex.clamp(
+          0,
+          max(0, _updatableFiles.length - 1),
+        );
+        _pageController.jumpToPage(safeIndex);
+        _precacheSurrounding(safeIndex);
+      }
+    });
+
+    final snackBar = SnackBar(
+      content: const Text('Moved to Recycle Bin'),
+      duration: const Duration(seconds: 4),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          _undoDeletion();
+        },
+      ),
+    );
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(snackBar).closed.then((reason) {
+      if (reason != SnackBarClosedReason.action) {
+        _commitDeletion();
+      }
+    });
+
+    _undoCommitTimer = Timer(const Duration(seconds: 4), () {
+      _commitDeletion();
+    });
+  }
+
+  // ✨ MODIFIED: Changed jumpToPage to animateToPage and clear cache
+  Future<void> _undoDeletion() async {
+    _undoCommitTimer?.cancel();
+    _undoCommitTimer = null;
+    if (!mounted || _lastDeletedFile == null || _lastDeletedIndex == null)
+      return;
+
+    final fileToRestore = _lastDeletedFile!;
+    final originalIndex = _lastDeletedIndex!;
+
+    // Clear undo state first
+    setState(() {
+      _lastDeletedFile = null;
+      _lastDeletedIndex = null;
+    });
+
+    // Restore file in background
+    await StorageHelper.restoreFileFromRecycleBin(fileToRestore);
+    await refreshItemCounts();
+
+    if (!mounted) return;
+
+    // Re-insert, update index, and clear cache entry in setState
+    setState(() {
+      final insertIndex = originalIndex.clamp(0, _updatableFiles.length);
+      _updatableFiles.insert(insertIndex, fileToRestore);
+      _currentIndex = insertIndex;
+      // ✨ ADDED: Clear cache for the restored index to force reload
+      _imageProviderCache.remove(_currentIndex);
+    });
+
+    // Animate PageView back *after* UI rebuilds
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pageController.hasClients) {
+        _pageController.animateToPage(
+          _currentIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+        _precacheSurrounding(_currentIndex);
+      }
+    });
+  }
+
+  void _commitDeletion() {
+    _undoCommitTimer?.cancel();
+    _undoCommitTimer = null;
+    if (mounted && _lastDeletedFile != null) {
+      setState(() {
+        _lastDeletedFile = null;
+        _lastDeletedIndex = null;
+      });
+      debugPrint("Deletion committed (Undo timeout or SnackBar dismissed)");
+    }
+  }
+
+  void _cancelUndo() {
+    _undoCommitTimer?.cancel();
+    _undoCommitTimer = null;
+    if (_lastDeletedFile != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        setState(() {
+          _lastDeletedFile = null;
+          _lastDeletedIndex = null;
+        });
+      }
     }
   }
 
   Future<void> _shareCurrentFile() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
     _stopSlideshow();
 
     final vaultFile = _updatableFiles[_currentIndex];
     if (!_folderReady || _parentFolderDir == null) return;
 
     final filePath = p.join(_parentFolderDir!.path, vaultFile.id);
-    final file = XFile(filePath);
-    await Share.shareXFiles([file]);
+    try {
+      final file = XFile(filePath);
+      await Share.shareXFiles([file]);
+    } catch (e) {
+      debugPrint("Error sharing file: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not share file.')));
+      }
+    }
   }
 
   void _showInfoSheet() async {
+    if (_currentIndex >= _updatableFiles.length || _lastDeletedFile != null)
+      return;
     _stopSlideshow();
 
     final vaultFile = _updatableFiles[_currentIndex];
     if (!_folderReady || _parentFolderDir == null) return;
 
     final file = File(p.join(_parentFolderDir!.path, vaultFile.id));
-    if (!await file.exists()) return;
+    if (!await file.exists()) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('File not found.')));
+      return;
+    }
 
-    // Get the easy/fast info first
-    final fileStat = await file.stat();
-    final fileSize = NumberFormat.compact().format(fileStat.size);
+    String fileSize = 'N/A';
+    try {
+      final fileStat = await file.stat();
+      fileSize = NumberFormat.compact().format(fileStat.size);
+    } catch (e) {
+      debugPrint("Error getting file size: $e");
+    }
+
     final dateAdded = DateFormat.yMMMd().add_jm().format(vaultFile.dateAdded);
 
-    // Show the sheet without waiting for dimensions
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.grey[900],
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
@@ -2903,27 +3286,29 @@ class _PhotoViewPageState extends State<PhotoViewPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          vaultFile.fileName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              fontSize: 16),
-                          overflow: TextOverflow.ellipsis,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        vaultFile.fileName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 16,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      IconButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _showRenameDialog();
-                        },
-                        icon: const Icon(Icons.edit, color: Colors.white70),
-                        tooltip: 'Rename',
-                      ),
-                    ]),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showRenameDialog();
+                      },
+                      icon: const Icon(Icons.edit, color: Colors.white70),
+                      tooltip: 'Rename',
+                    ),
+                  ],
+                ),
                 const Divider(height: 20, color: Colors.white24),
                 const SizedBox(height: 6),
                 _infoRow('Path:', '/${widget.parentFolder.name}'),
@@ -2943,19 +3328,29 @@ class _PhotoViewPageState extends State<PhotoViewPage>
   Widget _infoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(
-          width: 110,
-          child: Text(label,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
               style: const TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.white70)),
-        ),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 3)),
-      ]),
+                fontWeight: FontWeight.bold,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: Colors.white70),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 3,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2979,9 +3374,23 @@ class _AsyncDimensionsRowState extends State<_AsyncDimensionsRow> {
   }
 
   Future<void> _getDimensions() async {
+    if (!await widget.imageFile.exists()) {
+      if (mounted) setState(() => _dimensions = 'File missing');
+      return;
+    }
+
     try {
-      // This heavy work now happens independently without blocking the UI
+      if (await widget.imageFile.length() == 0) {
+        if (mounted) setState(() => _dimensions = 'Empty file');
+        return;
+      }
+
       final bytes = await widget.imageFile.readAsBytes();
+      if (bytes.isEmpty) {
+        if (mounted) setState(() => _dimensions = 'Empty file data');
+        return;
+      }
+
       final decodedImage = await compute(img.decodeImage, bytes);
 
       if (mounted && decodedImage != null) {
@@ -2990,14 +3399,14 @@ class _AsyncDimensionsRowState extends State<_AsyncDimensionsRow> {
         });
       } else if (mounted) {
         setState(() {
-          _dimensions = 'N/A';
+          _dimensions = 'Invalid format';
         });
       }
     } catch (e) {
       debugPrint('Error decoding image for dimensions: $e');
       if (mounted) {
         setState(() {
-          _dimensions = 'Error';
+          _dimensions = 'Error decoding';
         });
       }
     }
@@ -3005,25 +3414,35 @@ class _AsyncDimensionsRowState extends State<_AsyncDimensionsRow> {
 
   @override
   Widget build(BuildContext context) {
-    // This rebuilds only itself when the dimensions are ready
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SizedBox(
-          width: 110,
-          child: Text('Dimensions:',
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
-        ),
-        Expanded(
-            child: Text(_dimensions,
-                style: const TextStyle(color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 3)),
-      ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(
+            width: 110,
+            child: Text(
+              'Dimensions:',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              _dimensions,
+              style: const TextStyle(color: Colors.white70),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 3,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
+
 === end of photo_view_page.dart ===]
 
 [==== recycle_bin_page.dart ===
